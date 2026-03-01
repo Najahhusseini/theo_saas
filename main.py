@@ -108,6 +108,9 @@ def read_root():
 @app.get("/health")
 def health_check(db: Session = Depends(get_db)):
     """Health check endpoint for Railway monitoring"""
+    from sqlalchemy import text
+    from datetime import datetime
+    
     health_status = {
         "status": "healthy",
         "timestamp": str(datetime.utcnow()),
@@ -118,9 +121,10 @@ def health_check(db: Session = Depends(get_db)):
         }
     }
     
-    # Test database connection
+    # Test database connection - FIXED SYNTAX
     try:
-        db.execute("SELECT 1")
+        # Use text() for raw SQL
+        db.execute(text("SELECT 1"))
         health_status["database"] = "connected"
     except Exception as e:
         health_status["database"] = f"error: {str(e)}"
@@ -128,7 +132,6 @@ def health_check(db: Session = Depends(get_db)):
     
     # Test Telegram bot token format (basic check)
     if TELEGRAM_BOT_TOKEN:
-        # Basic token format check (should be numbers:token)
         if ":" in TELEGRAM_BOT_TOKEN:
             health_status["telegram_token_format"] = "valid"
         else:
