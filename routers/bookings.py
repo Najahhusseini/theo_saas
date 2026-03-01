@@ -126,10 +126,7 @@ def create_booking_request(
         db.refresh(new_request)
 
         # 🔥 SEND TO TELEGRAM AFTER COMMIT
-        send_booking_to_manager(
-            chat_id=os.getenv("MANAGER_CHAT_ID"),
-            booking=new_request
-        )
+        send_booking_to_manager(new_request)
 
         return new_request
 
