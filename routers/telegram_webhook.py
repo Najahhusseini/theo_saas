@@ -98,7 +98,7 @@ async def handle_callback_query(callback, db: Session):
             
             # Generate draft reply
             draft = generate_reply_draft(booking, new_status)
-            booking.ai_draft_email = draft
+            booking.draft_reply = draft
             db.commit()
             logger.info(f"Generated draft for booking #{booking_id}")
             
@@ -120,7 +120,7 @@ async def handle_callback_query(callback, db: Session):
             db.commit()
             
             # Send clear instructions to the manager
-            current_draft = booking.ai_draft_email or "No draft yet."
+            current_draft = booking.draft_reply or "No draft yet."
             
             instruction_message = (
                 f"✏️ **EDITING DRAFT for Booking #{booking.id}**\n\n"
@@ -149,7 +149,7 @@ async def handle_callback_query(callback, db: Session):
             booking.status = "Email_Sent"
             db.commit()
             
-            # Move to confirmed bookings
+            # Move to confirmed bookings - MAP draft_reply TO ai_draft_email
             confirmed_booking = models.ConfirmedBooking(
                 booking_request_id=booking.id,
                 hotel_id=booking.hotel_id,
@@ -161,11 +161,11 @@ async def handle_callback_query(callback, db: Session):
                 number_of_rooms=booking.number_of_rooms,
                 number_of_guests=booking.number_of_guests,
                 special_requests=booking.special_requests,
-                ai_draft_email=booking.ai_draft_email
+                ai_draft_email=booking.draft_reply  # CHANGED: from ai_draft_email to draft_reply
             )
             db.add(confirmed_booking)
             db.commit()
-            logger.info(f"Booking #{booking_id} moved to confirmed bookings")
+            logger.info(f"Booking #{booking_id} moved to confirmed bookings with ai_draft_email={booking.draft_reply}")
             
             await send_telegram_message(
                 chat_id,
@@ -235,8 +235,8 @@ async def handle_text_message(message, db: Session):
             logger.info(f"Found booking #{booking.id} in editing mode")
             
             # Update draft
-            old_draft = booking.ai_draft_email
-            booking.ai_draft_email = text
+            old_draft = booking.draft_reply
+            booking.draft_reply = text
             booking.status = "Draft_Ready"
             db.commit()
             
