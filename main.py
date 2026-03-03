@@ -65,14 +65,14 @@ except Exception as e:
 app = FastAPI(
     title="THeO Hotel Booking Automation",
     description="API for hotel booking automation system with Telegram integration and modification tracking",
-    version="2.0.0"  # Updated version
+    version="2.0.0"
 )
 
 # Include routers
 app.include_router(bookings_router)
 app.include_router(confirmed_router)
 app.include_router(telegram_router)
-app.include_router(modifications_router)  # NEW ROUTER
+app.include_router(modifications_router)
 
 # -------------------------
 # MIDDLEWARE
@@ -100,17 +100,23 @@ def read_root():
             "telegram_webhook": "/telegram/webhook",
             "bookings": "/booking-requests",
             "confirmed_bookings": "/confirmed-bookings",
-            "modifications": "/modifications",  # NEW ENDPOINT
+            "modifications": "/modifications",
             "hotels": "/hotels/",
             "users": "/users/",
-            "login": "/login"
+            "login": "/login",
+            "room_types": {
+                "create_test": "/room-types/create-test",
+                "list": "/room-types/list",
+                "by_hotel": "/room-types/by-hotel/{hotel_id}"
+            }
         },
         "features": {
             "booking_management": True,
             "telegram_integration": True,
-            "modification_tracking": True,  # NEW FEATURE
+            "modification_tracking": True,
             "ai_drafts": True,
-            "manager_qa": True
+            "manager_qa": True,
+            "room_type_management": True
         }
     }
 
@@ -460,6 +466,193 @@ def get_modification_stats(db: Session = Depends(get_db)):
         return {"error": str(e)}
 
 # -------------------------
+# ROOM TYPE MANAGEMENT ENDPOINTS
+# -------------------------
+@app.post("/room-types/create-test")
+def create_test_room_types(db: Session = Depends(get_db)):
+    """Create test room types for hotel_id=1"""
+    try:
+        # First, check if hotel 1 exists, if not create it
+        hotel = db.query(models.Hotel).filter(models.Hotel.id == 1).first()
+        if not hotel:
+            hotel = models.Hotel(name="Default Hotel", subscription_plan="basic")
+            db.add(hotel)
+            db.flush()
+            logger.info(f"Created default hotel with ID: {hotel.id}")
+        
+        # Check if room types already exist
+        existing = db.query(models.RoomType).filter(models.RoomType.hotel_id == 1).count()
+        if existing > 0:
+            return {
+                "message": f"Room types already exist ({existing} found)",
+                "room_types": [
+                    {"name": rt.name, "total_rooms": rt.total_rooms} 
+                    for rt in db.query(models.RoomType).filter(models.RoomType.hotel_id == 1).all()
+                ]
+            }
+        
+        # Create standard room types
+        room_types = [
+            models.RoomType(name="Standard", total_rooms=20, hotel_id=1),
+            models.RoomType(name="Deluxe", total_rooms=15, hotel_id=1),
+            models.RoomType(name="Suite", total_rooms=10, hotel_id=1),
+            models.RoomType(name="Family", total_rooms=8, hotel_id=1)
+        ]
+        
+        for rt in room_types:
+            db.add(rt)
+        
+        db.commit()
+        
+        return {
+            "message": "Test room types created successfully",
+            "room_types": [{"name": rt.name, "total_rooms": rt.total_rooms} for rt in room_types]
+        }
+    except Exception as e:
+        logger.error(f"Error creating room types: {e}")
+        db.rollback()
+        return {"error": str(e)}
+
+@app.get("/room-types/list")
+def list_room_types(db: Session = Depends(get_db)):
+    """List all room types"""
+    try:
+        room_types = db.query(models.RoomType).all()
+        if not room_types:
+            return {"message": "No room types found", "room_types": []}
+        
+        return [
+            {
+                "id": rt.id,
+                "name": rt.name,
+                "total_rooms": rt.total_rooms,
+                "hotel_id": rt.hotel_id
+            }
+            for rt in room_types
+        ]
+    except Exception as e:
+        logger.error(f"Error listing room types: {e}")
+        return {"error": str(e)}
+
+@app.get("/room-types/by-hotel/{hotel_id}")
+def get_room_types_by_hotel(hotel_id: int, db: Session = Depends(get_db)):
+    """Get room types for a specific hotel"""
+    try:
+        room_types = db.query(models.RoomType).filter(models.RoomType.hotel_id == hotel_id).all()
+        return [
+            {
+                "id": rt.id,
+                "name": rt.name,
+                "total_rooms": rt.total_rooms
+            }
+            for rt in room_types
+        ]
+    except Exception as e:
+        logger.error(f"Error getting room types: {e}")
+        return {"error": str(e)}
+
+@app.post("/room-types/create")
+def create_room_type(
+    name: str,
+    total_rooms: int,
+    hotel_id: int,
+    db: Session = Depends(get_db)
+):
+    """Create a new room type for a hotel"""
+    try:
+        # Check if hotel exists
+        hotel = db.query(models.Hotel).filter(models.Hotel.id == hotel_id).first()
+        if not hotel:
+            raise HTTPException(status_code=404, detail="Hotel not found")
+        
+        # Check if room type already exists for this hotel
+        existing = db.query(models.RoomType).filter(
+            models.RoomType.hotel_id == hotel_id,
+            models.RoomType.name == name
+        ).first()
+        
+        if existing:
+            raise HTTPException(status_code=400, detail="Room type already exists for this hotel")
+        
+        new_room_type = models.RoomType(
+            name=name,
+            total_rooms=total_rooms,
+            hotel_id=hotel_id
+        )
+        
+        db.add(new_room_type)
+        db.commit()
+        db.refresh(new_room_type)
+        
+        logger.info(f"Created room type: {name} for hotel {hotel_id}")
+        
+        return {
+            "id": new_room_type.id,
+            "name": new_room_type.name,
+            "total_rooms": new_room_type.total_rooms,
+            "hotel_id": new_room_type.hotel_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating room type: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/room-types/{room_type_id}")
+def update_room_type(
+    room_type_id: int,
+    total_rooms: int = None,
+    name: str = None,
+    db: Session = Depends(get_db)
+):
+    """Update a room type"""
+    try:
+        room_type = db.query(models.RoomType).filter(models.RoomType.id == room_type_id).first()
+        if not room_type:
+            raise HTTPException(status_code=404, detail="Room type not found")
+        
+        if total_rooms is not None:
+            room_type.total_rooms = total_rooms
+        if name is not None:
+            room_type.name = name
+        
+        db.commit()
+        db.refresh(room_type)
+        
+        return {
+            "id": room_type.id,
+            "name": room_type.name,
+            "total_rooms": room_type.total_rooms,
+            "hotel_id": room_type.hotel_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating room type: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/room-types/{room_type_id}")
+def delete_room_type(room_type_id: int, db: Session = Depends(get_db)):
+    """Delete a room type"""
+    try:
+        room_type = db.query(models.RoomType).filter(models.RoomType.id == room_type_id).first()
+        if not room_type:
+            raise HTTPException(status_code=404, detail="Room type not found")
+        
+        db.delete(room_type)
+        db.commit()
+        
+        return {"message": "Room type deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting room type: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------
 # ERROR HANDLERS
 # -------------------------
 @app.exception_handler(HTTPException)
@@ -507,37 +700,6 @@ async def startup_event():
             logger.info(f"  {route.methods} {route.path}")
     
     logger.info("="*50)
-
-@app.post("/room-types/create-test")
-def create_test_room_types(db: Session = Depends(get_db)):
-    """Create test room types for hotel_id=1"""
-    try:
-        # Check if room types already exist
-        existing = db.query(models.RoomType).filter(models.RoomType.hotel_id == 1).count()
-        if existing > 0:
-            return {"message": f"Room types already exist ({existing} found)"}
-        
-        # Create standard room types
-        room_types = [
-            models.RoomType(name="Standard", total_rooms=20, hotel_id=1),
-            models.RoomType(name="Deluxe", total_rooms=15, hotel_id=1),
-            models.RoomType(name="Suite", total_rooms=10, hotel_id=1),
-            models.RoomType(name="Family", total_rooms=8, hotel_id=1)
-        ]
-        
-        for rt in room_types:
-            db.add(rt)
-        
-        db.commit()
-        
-        return {
-            "message": "Test room types created successfully",
-            "room_types": [{"name": rt.name, "total_rooms": rt.total_rooms} for rt in room_types]
-        }
-    except Exception as e:
-        logger.error(f"Error creating room types: {e}")
-        db.rollback()
-        return {"error": str(e)}
 
 # -------------------------
 # SHUTDOWN EVENT
