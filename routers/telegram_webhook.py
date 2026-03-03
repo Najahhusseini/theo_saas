@@ -656,7 +656,7 @@ async def handle_text_message(message, db: Session):
                 )
                 return {"status": "command_blocked"}
             
-            # Normal mode commands
+                        # Normal mode commands
             if text == '/stats':
                 await handle_stats_command(chat_id, db)
                 return {"status": "command_processed"}
@@ -665,6 +665,16 @@ async def handle_text_message(message, db: Session):
                 return {"status": "command_processed"}
             elif text == '/pending':
                 await handle_pending_command(chat_id, db)
+                return {"status": "command_processed"}
+            # NEW COMMANDS - Add these
+            elif text.startswith('/availability'):
+                await handle_availability_command(chat_id, text[13:], db)
+                return {"status": "command_processed"}
+            elif text.startswith('/bookings'):
+                await handle_bookings_command(chat_id, text[10:], db)
+                return {"status": "command_processed"}
+            elif text.startswith('/modify'):
+                await handle_modify_command(chat_id, text[8:], db)
                 return {"status": "command_processed"}
             else:
                 await send_telegram_message(
@@ -757,6 +767,197 @@ async def handle_text_message(message, db: Session):
     except Exception as e:
         logger.error(f"Error in handle_text_message: {str(e)}", exc_info=True)
         return {"status": "error", "message": str(e)}
+async def handle_availability_command(chat_id: int, args: str, db: Session):
+    """Usage: /availability YYYY-MM-DD [room_type]"""
+    parts = args.strip().split()
+    if not parts:
+        await send_telegram_message(chat_id, 
+            "📅 *Availability Command*\n\n"
+            "Usage: `/availability YYYY-MM-DD [room_type]`\n"
+            "Example: `/availability 2026-03-05`\n"
+            "Example: `/availability 2026-03-05 Deluxe`"
+        )
+        return
+    
+    try:
+        check_date = date.fromisoformat(parts[0])
+    except ValueError:
+        await send_telegram_message(chat_id, "❌ Invalid date format. Use YYYY-MM-DD (e.g., 2026-03-05)")
+        return
+    
+    room_type = parts[1] if len(parts) > 1 else None
+    
+    # Get hotel_id from context (using 1 as default for now)
+    hotel_id = 1
+    
+    try:
+        from services.availability import check_availability
+        avail = check_availability(db, hotel_id, check_date, room_type)
+    except Exception as e:
+        logger.error(f"Availability check error: {e}")
+        await send_telegram_message(chat_id, "❌ Error checking availability. Please try again.")
+        return
+
+    if room_type:
+        if room_type in avail:
+            data = avail[room_type]
+            msg = (
+                f"📅 *Availability for {check_date}*\n\n"
+                f"🏨 *Room Type:* {room_type}\n"
+                f"📊 Booked: {data['booked']} rooms\n"
+                f"✅ Available: {data['available']} rooms\n"
+                f"🏢 Total: {data['total']} rooms\n"
+                f"👥 Guests: {data['guests']} checking in"
+            )
+        else:
+            msg = f"❌ Room type '{room_type}' not found for this date."
+    else:
+        if not avail:
+            msg = f"📅 No room types found for {check_date}."
+        else:
+            msg = f"📅 *Availability Summary for {check_date}*\n\n"
+            for rt, data in avail.items():
+                msg += f"🏨 *{rt}*: {data['available']}/{data['total']} available ({data['guests']} guests)\n"
+    
+    await send_telegram_message(chat_id, msg)
+
+async def handle_bookings_command(chat_id: int, args: str, db: Session):
+    """Usage: /bookings YYYY-MM-DD YYYY-MM-DD"""
+    parts = args.strip().split()
+    if len(parts) < 2:
+        await send_telegram_message(chat_id,
+            "📋 *Bookings Command*\n\n"
+            "Usage: `/bookings YYYY-MM-DD YYYY-MM-DD`\n"
+            "Example: `/bookings 2026-03-01 2026-03-05`"
+        )
+        return
+    
+    try:
+        start = date.fromisoformat(parts[0])
+        end = date.fromisoformat(parts[1])
+    except ValueError:
+        await send_telegram_message(chat_id, "❌ Invalid date format. Use YYYY-MM-DD")
+        return
+
+    if start > end:
+        await send_telegram_message(chat_id, "❌ Start date must be before end date.")
+        return
+
+    hotel_id = 1
+    
+    try:
+        from services.availability import get_daily_occupancy, get_booking_summary
+        occupancy = get_daily_occupancy(db, hotel_id, start, end)
+        bookings = get_booking_summary(db, hotel_id, start, end)
+    except Exception as e:
+        logger.error(f"Bookings query error: {e}")
+        await send_telegram_message(chat_id, "❌ Error retrieving bookings. Please try again.")
+        return
+
+    if not bookings:
+        await send_telegram_message(chat_id, f"📋 No bookings found from {start} to {end}.")
+        return
+
+    # Send summary first
+    summary_msg = f"📋 *Booking Summary*\n{start} → {end}\n\n"
+    summary_msg += f"📊 Total Bookings: {len(bookings)}\n"
+    
+    # Count by room type
+    room_counts = {}
+    guest_counts = {}
+    for b in bookings:
+        room_counts[b['room_type']] = room_counts.get(b['room_type'], 0) + b['rooms']
+        guest_counts[b['room_type']] = guest_counts.get(b['room_type'], 0) + b['guests']
+    
+    for rt, count in room_counts.items():
+        summary_msg += f"🏨 {rt}: {count} rooms ({guest_counts[rt]} guests)\n"
+    
+    await send_telegram_message(chat_id, summary_msg)
+
+    # Send detailed daily breakdown if there are multiple days
+    if (end - start).days > 0:
+        detail_msg = f"📅 *Daily Breakdown*\n\n"
+        for d, rooms in occupancy.items():
+            date_str = d
+            daily_bookings = [b for b in bookings if b['arrival'] <= date_str < b['departure']]
+            if daily_bookings:
+                detail_msg += f"*{date_str}*:\n"
+                for b in daily_bookings[:3]:  # Limit to 3 per day to avoid long messages
+                    detail_msg += f"  • #{b['id']}: {b['guest']} - {b['room_type']} ({b['guests']} guests)\n"
+                if len(daily_bookings) > 3:
+                    detail_msg += f"  ... and {len(daily_bookings)-3} more\n"
+        
+        await send_telegram_message(chat_id, detail_msg)
+
+async def handle_modify_command(chat_id: int, args: str, db: Session):
+    """Usage: /modify <confirmed_booking_id>"""
+    args = args.strip()
+    if not args:
+        await send_telegram_message(chat_id,
+            "✏️ *Modify Booking Command*\n\n"
+            "Usage: `/modify <booking_id>`\n"
+            "Example: `/modify 123`"
+        )
+        return
+    
+    try:
+        booking_id = int(args)
+    except ValueError:
+        await send_telegram_message(chat_id, "❌ Invalid booking ID. Must be a number.")
+        return
+
+    booking = db.query(models.ConfirmedBooking).filter(models.ConfirmedBooking.id == booking_id).first()
+    if not booking:
+        await send_telegram_message(chat_id, f"❌ Confirmed booking #{booking_id} not found.")
+        return
+
+    # Check if there's already a pending modification
+    existing_mod = db.query(models.ModificationRequest).filter(
+        models.ModificationRequest.original_booking_id == booking_id,
+        models.ModificationRequest.status == "Pending"
+    ).first()
+    
+    if existing_mod:
+        await send_telegram_message(
+            chat_id,
+            f"⚠️ Modification #{existing_mod.id} already pending for this booking.\n"
+            f"Please approve/reject it first or wait for it to be processed."
+        )
+        return
+
+    # Create a modification request
+    modification = models.ModificationRequest(
+        original_booking_id=booking.id,
+        guest_name=booking.guest_name,
+        email=booking.email,
+        arrival_date=booking.arrival_date,
+        departure_date=booking.departure_date,
+        room_type=booking.room_type,
+        number_of_rooms=booking.number_of_rooms,
+        number_of_guests=booking.number_of_guests,
+        special_requests=booking.special_requests,
+        status="Pending"
+    )
+    db.add(modification)
+    db.commit()
+    db.refresh(modification)
+
+    # Mark original booking as having pending modification
+    booking.has_pending_modification = True
+    db.commit()
+
+    # Send modification notification
+    try:
+        from services.telegram import send_modification_notification
+        await send_modification_notification(modification, booking)
+    except Exception as e:
+        logger.error(f"Failed to send modification notification: {e}")
+
+    await send_telegram_message(
+        chat_id,
+        f"✅ Modification request #{modification.id} created for booking #{booking_id}.\n"
+        f"Please review it in the message above."
+    )
 
 async def handle_manager_question(chat_id: int, question: str, db: Session):
     """Handle manager questions with predefined answers"""
