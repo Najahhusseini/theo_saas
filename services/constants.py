@@ -86,3 +86,24 @@ HELP_MESSAGE = """
 
 *Need more help?* Contact support@theo.com
 """
+# Add to services/constants.py
+
+# Mode indicators
+MODE_INDICATORS = {
+    "normal": "💬 *Normal Mode*",
+    "editing": "✏️ *EDITING MODE* - Reply to this message to update draft"
+}
+
+# Command availability by mode
+COMMANDS_BY_MODE = {
+    "normal": ["/stats", "/today", "/pending", "/help"],
+    "editing": ["/cancel", "/help"]  # Limited commands in editing mode
+}
+
+# Mode transition messages
+MODE_MESSAGES = {
+    "enter_edit": "✏️ *ENTERING EDIT MODE*\n\nYou are now editing the draft. Send your revised message as a reply to this message.\n\nType /cancel to exit edit mode.",
+    "exit_edit": "💬 *EXITING EDIT MODE*\n\nYou are back to normal mode. Use /help to see available commands.",
+    "already_editing": "⚠️ You are already in edit mode. Please send your draft or type /cancel to exit.",
+    "not_editing": "ℹ️ You are not in edit mode. Click 'Edit Draft' on a booking to start editing."
+}

@@ -16,7 +16,7 @@ import requests
 import os
 import json
 import re
-from datetime import date
+from datetime import date, datetime  # Added datetime import
 
 # Add these helper functions after your imports
 def get_mode_indicator(chat_id: int, db: Session) -> str:
@@ -179,7 +179,11 @@ async def handle_callback_query(callback, db: Session):
             await send_telegram_message(chat_id, "❌ Invalid booking ID.")
             return {"status": "error", "message": "Invalid booking ID"}
         
-        # Get booking from database
+        # Handle modification actions first (they use modification IDs, not booking IDs)
+        if action in ["mod_approve", "mod_reject", "mod_details"]:
+            return await handle_modification_actions(action, booking_id, chat_id, message_id, db)
+        
+        # Get booking from database for regular booking actions
         booking = db.query(models.BookingRequest).filter(
             models.BookingRequest.id == booking_id
         ).first()
@@ -363,6 +367,200 @@ async def handle_callback_query(callback, db: Session):
         logger.error(f"Error in handle_callback_query: {str(e)}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
+async def handle_modification_actions(action: str, modification_id: int, chat_id: int, message_id: int, db: Session):
+    """Handle modification-related callback actions"""
+    
+    if action == "mod_approve":
+        logger.info(f"Processing modification approve for modification {modification_id}")
+        
+        # Get modification
+        modification = db.query(models.ModificationRequest).filter(
+            models.ModificationRequest.id == modification_id
+        ).first()
+        
+        if not modification:
+            await send_telegram_message(chat_id, f"❌ Modification #{modification_id} not found.")
+            return {"status": "error"}
+        
+        if modification.status != "Pending":
+            await send_telegram_message(chat_id, f"❌ Modification already {modification.status}")
+            return {"status": "error"}
+        
+        # Get original booking
+        original = db.query(models.ConfirmedBooking).filter(
+            models.ConfirmedBooking.id == modification.original_booking_id
+        ).first()
+        
+        if not original:
+            await send_telegram_message(chat_id, f"❌ Original booking not found.")
+            return {"status": "error"}
+        
+        # Track changes
+        changes = []
+        
+        # Apply changes
+        if modification.guest_name != original.guest_name:
+            changes.append(("Guest Name", original.guest_name, modification.guest_name))
+            original.guest_name = modification.guest_name
+        
+        if modification.email != original.email:
+            changes.append(("Email", original.email, modification.email))
+            original.email = modification.email
+        
+        if modification.arrival_date != original.arrival_date:
+            changes.append(("Check-in", str(original.arrival_date), str(modification.arrival_date)))
+            original.arrival_date = modification.arrival_date
+        
+        if modification.departure_date != original.departure_date:
+            changes.append(("Check-out", str(original.departure_date), str(modification.departure_date)))
+            original.departure_date = modification.departure_date
+        
+        if modification.room_type != original.room_type:
+            changes.append(("Room Type", original.room_type, modification.room_type))
+            original.room_type = modification.room_type
+        
+        if modification.number_of_rooms != original.number_of_rooms:
+            changes.append(("Rooms", str(original.number_of_rooms), str(modification.number_of_rooms)))
+            original.number_of_rooms = modification.number_of_rooms
+        
+        if modification.number_of_guests != original.number_of_guests:
+            changes.append(("Guests", str(original.number_of_guests), str(modification.number_of_guests)))
+            original.number_of_guests = modification.number_of_guests
+        
+        if modification.special_requests != original.special_requests:
+            changes.append(("Special Requests", original.special_requests or "None", modification.special_requests or "None"))
+            original.special_requests = modification.special_requests
+        
+        # Update modification status
+        modification.status = "Approved"
+        modification.processed_at = datetime.utcnow()
+        
+        # Clear pending flag
+        original.has_pending_modification = False
+        original.last_modified_at = datetime.utcnow()
+        
+        db.commit()
+        
+        # Log changes to history
+        for field, old, new in changes:
+            history = models.ModificationHistory(
+                booking_id=original.id,
+                booking_type="confirmed",
+                field_name=field,
+                old_value=str(old) if old else None,
+                new_value=str(new) if new else None,
+                modified_at=datetime.utcnow(),
+                modification_reason="guest_request"
+            )
+            db.add(history)
+        
+        db.commit()
+        
+        # Send confirmation
+        if changes:
+            changes_text = "\n".join([f"• {c[0]}: {c[1]} → {c[2]}" for c in changes])
+            
+            await send_telegram_message(
+                chat_id,
+                f"✅ *Modification Approved*\n\n"
+                f"Booking #{original.id} has been updated.\n\n"
+                f"*Changes applied:*\n{changes_text}"
+            )
+        else:
+            await send_telegram_message(
+                chat_id,
+                f"✅ *Modification Approved*\n\nModification #{modification_id} for Booking #{original.id} was approved with no changes."
+            )
+        
+        # Update the original message
+        await edit_message_text(
+            chat_id,
+            message_id,
+            f"✅ *Modification #{modification.id} APPROVED*\n\n{len(changes)} changes applied to Booking #{original.id}"
+        )
+    
+    elif action == "mod_reject":
+        logger.info(f"Processing modification reject for modification {modification_id}")
+        
+        # Get modification
+        modification = db.query(models.ModificationRequest).filter(
+            models.ModificationRequest.id == modification_id
+        ).first()
+        
+        if not modification:
+            await send_telegram_message(chat_id, f"❌ Modification #{modification_id} not found.")
+            return {"status": "error"}
+        
+        # Ask for rejection reason
+        await send_telegram_message(
+            chat_id,
+            f"❓ *Reason for Rejection*\n\nPlease reply with the reason for rejecting modification #{modification.id}",
+            reply_markup={
+                "force_reply": True,
+                "input_field_placeholder": "Enter rejection reason..."
+            }
+        )
+        
+        # Store modification ID in a way we can retrieve later
+        # For simplicity, we'll use a global dict (not ideal for production)
+        # In production, you'd want to store this in a cache or database
+        if not hasattr(handle_modification_actions, "pending_rejections"):
+            handle_modification_actions.pending_rejections = {}
+        handle_modification_actions.pending_rejections[chat_id] = modification_id
+    
+    elif action == "mod_details":
+        logger.info(f"Processing modification details for modification {modification_id}")
+        
+        # Get modification
+        modification = db.query(models.ModificationRequest).filter(
+            models.ModificationRequest.id == modification_id
+        ).first()
+        
+        if not modification:
+            await send_telegram_message(chat_id, f"❌ Modification #{modification_id} not found.")
+            return {"status": "error"}
+        
+        # Get original booking
+        original = db.query(models.ConfirmedBooking).filter(
+            models.ConfirmedBooking.id == modification.original_booking_id
+        ).first()
+        
+        # Create comparison
+        comparison = f"""
+📋 *MODIFICATION DETAILS* #{modification.id}
+
+━━━━━━━━━━━━━━━━━━━
+
+*Field* │ *Original* │ *Requested*
+────────┼───────────┼──────────────
+👤 Name │ {original.guest_name if original else 'N/A'} │ {modification.guest_name}
+📅 In   │ {str(original.arrival_date) if original and original.arrival_date else 'N/A'} │ {str(modification.arrival_date) if modification.arrival_date else 'N/A'}
+📅 Out  │ {str(original.departure_date) if original and original.departure_date else 'N/A'} │ {str(modification.departure_date) if modification.departure_date else 'N/A'}
+🛏 Room │ {original.room_type if original else 'N/A'} │ {modification.room_type}
+🔢 Rooms│ {original.number_of_rooms if original else 'N/A'} │ {modification.number_of_rooms}
+👥 Guests│ {original.number_of_guests if original else 'N/A'} │ {modification.number_of_guests}
+
+━━━━━━━━━━━━━━━━━━━
+
+*Special Requests:*\n{modification.special_requests or 'None'}
+
+*Status:* {modification.status}
+*Created:* {modification.created_at}
+"""
+        
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ APPROVE", "callback_data": f"mod_approve_{modification.id}"},
+                    {"text": "❌ REJECT", "callback_data": f"mod_reject_{modification.id}"}
+                ]
+            ]
+        }
+        
+        await send_telegram_message(chat_id, comparison, reply_markup=keyboard)
+    
+    return {"status": "success"}
+
 async def handle_text_message(message, db: Session):
     """Handle text messages (for editing drafts and answering questions)"""
     try:
@@ -375,6 +573,37 @@ async def handle_text_message(message, db: Session):
         message_id = message["message_id"]
         
         logger.info(f"Processing text message from chat {chat_id}: {text[:50]}...")
+        
+        # Check if this is a rejection reason for a modification
+        if hasattr(handle_modification_actions, "pending_rejections") and chat_id in handle_modification_actions.pending_rejections:
+            modification_id = handle_modification_actions.pending_rejections.pop(chat_id)
+            
+            # Get modification
+            modification = db.query(models.ModificationRequest).filter(
+                models.ModificationRequest.id == modification_id
+            ).first()
+            
+            if modification:
+                # Update modification status
+                modification.status = "Rejected"
+                modification.processed_at = datetime.utcnow()
+                modification.modification_notes = text
+                
+                # Clear pending flag on original booking
+                original = db.query(models.ConfirmedBooking).filter(
+                    models.ConfirmedBooking.id == modification.original_booking_id
+                ).first()
+                
+                if original:
+                    original.has_pending_modification = False
+                
+                db.commit()
+                
+                await send_telegram_message(
+                    chat_id,
+                    f"❌ *Modification Rejected*\n\nModification #{modification_id} has been rejected.\nReason: {text}"
+                )
+                return {"status": "modification_rejected"}
         
         # Check if we're in editing mode
         editing_booking = get_editing_booking(db)

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, Text, TIMESTAMP
+from sqlalchemy import Column, Integer, String, Date, ForeignKey, Text, TIMESTAMP, Boolean
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime
@@ -85,3 +85,66 @@ class ConfirmedBooking(Base):
     # 🔥 AI Draft Email Storage
     ai_draft_email = Column(Text, nullable=True)
     
+# Add to models.py
+
+class ModificationRequest(Base):
+    """Track modification requests for confirmed bookings"""
+    __tablename__ = "modification_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # Link to original confirmed booking
+    original_booking_id = Column(Integer, ForeignKey("confirmed_bookings.id"))
+    original_booking = relationship("ConfirmedBooking", back_populates="modifications")
+    
+    # New requested changes
+    guest_name = Column(String)
+    email = Column(String)
+    arrival_date = Column(Date)
+    departure_date = Column(Date)
+    room_type = Column(String)
+    number_of_rooms = Column(Integer)
+    number_of_guests = Column(Integer)
+    special_requests = Column(Text)
+    
+    # Metadata
+    status = Column(String, default="Pending")  # Pending, Approved, Rejected
+    created_at = Column(TIMESTAMP, default=datetime.utcnow)
+    updated_at = Column(TIMESTAMP, default=datetime.utcnow, onupdate=datetime.utcnow)
+    raw_email = Column(Text)
+    
+    # Who processed it
+    processed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    processed_at = Column(TIMESTAMP, nullable=True)
+    
+    # Notes
+    modification_notes = Column(Text)
+
+class ModificationHistory(Base):
+    """Track all changes made to bookings"""
+    __tablename__ = "modification_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    booking_id = Column(Integer)  # Can be booking_request_id or confirmed_booking_id
+    booking_type = Column(String)  # "request" or "confirmed"
+    
+    field_name = Column(String)
+    old_value = Column(Text)
+    new_value = Column(Text)
+    
+    modified_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    modified_at = Column(TIMESTAMP, default=datetime.utcnow)
+    modification_reason = Column(String)  # "guest_request", "manager_update", etc.
+
+# Update ConfirmedBooking to include relationship
+class ConfirmedBooking(Base):
+    __tablename__ = "confirmed_bookings"
+    
+    # ... existing fields ...
+    
+    # Add relationship to modifications
+    modifications = relationship("ModificationRequest", back_populates="original_booking")
+    
+    # Track modification status
+    has_pending_modification = Column(Boolean, default=False)
+    last_modified_at = Column(TIMESTAMP, nullable=True)

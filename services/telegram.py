@@ -398,3 +398,150 @@ def send_booking_details(chat_id: str, booking):
         return send_telegram_message(chat_id, message, reply_markup=keyboard)
     else:
         return send_telegram_message(chat_id, message)
+def send_modification_notification(modification, original_booking):
+    """Send modification request notification to manager"""
+    
+    # Calculate changes
+    changes = []
+    if modification.guest_name != original_booking.guest_name:
+        changes.append(f"👤 Name: {original_booking.guest_name} → {modification.guest_name}")
+    if modification.arrival_date != original_booking.arrival_date:
+        changes.append(f"📅 Check-in: {original_booking.arrival_date} → {modification.arrival_date}")
+    if modification.departure_date != original_booking.departure_date:
+        changes.append(f"📅 Check-out: {original_booking.departure_date} → {modification.departure_date}")
+    if modification.room_type != original_booking.room_type:
+        changes.append(f"🛏 Room: {original_booking.room_type} → {modification.room_type}")
+    if modification.number_of_rooms != original_booking.number_of_rooms:
+        changes.append(f"🔢 Rooms: {original_booking.number_of_rooms} → {modification.number_of_rooms}")
+    if modification.number_of_guests != original_booking.number_of_guests:
+        changes.append(f"👥 Guests: {original_booking.number_of_guests} → {modification.number_of_guests}")
+    
+    changes_text = "\n".join(changes) if changes else "No changes detected"
+    
+    message = f"""
+🔄 *MODIFICATION REQUEST* #{modification.id}
+
+━━━━━━━━━━━━━━━━━━━
+
+*Original Booking:* #{original_booking.id}
+*Guest:* {original_booking.guest_name}
+
+━━━━━━━━━━━━━━━━━━━
+
+*REQUESTED CHANGES:*
+
+{changes_text}
+
+━━━━━━━━━━━━━━━━━━━
+
+*Special Requests:*
+{modification.special_requests or "None"}
+
+━━━━━━━━━━━━━━━━━━━
+👇 *Review modification request*
+"""
+    
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ APPROVE", "callback_data": f"mod_approve_{modification.id}"},
+                {"text": "❌ REJECT", "callback_data": f"mod_reject_{modification.id}"}
+            ],
+            [
+                {"text": "📋 VIEW ORIGINAL", "callback_data": f"details_{original_booking.id}"},
+                {"text": "📝 VIEW CHANGES", "callback_data": f"mod_details_{modification.id}"}
+            ]
+        ]
+    }
+    
+    return send_telegram_message(os.getenv("MANAGER_CHAT_ID"), message, reply_markup=keyboard)
+
+def send_modification_update_confirmation(modification, updated_booking, changes):
+    """Send confirmation after modification is approved"""
+    
+    changes_text = "\n".join([f"• {c[0]}: {c[1]} → {c[2]}" for c in changes])
+    
+    message = f"""
+✅ *MODIFICATION APPROVED*
+
+━━━━━━━━━━━━━━━━━━━
+
+*Booking #{updated_booking.id} has been updated*
+
+*Changes applied:*
+{changes_text}
+
+━━━━━━━━━━━━━━━━━━━
+
+*Updated Booking Details:*
+👤 {updated_booking.guest_name}
+📅 {updated_booking.arrival_date} → {updated_booking.departure_date}
+🛏 {updated_booking.room_type} x{updated_booking.number_of_rooms}
+👥 {updated_booking.number_of_guests} guests
+
+━━━━━━━━━━━━━━━━━━━
+"""
+    
+    return send_telegram_message(os.getenv("MANAGER_CHAT_ID"), message)
+
+def send_modification_rejected_notification(modification, reason):
+    """Send notification when modification is rejected"""
+    
+    message = f"""
+❌ *MODIFICATION REJECTED*
+
+━━━━━━━━━━━━━━━━━━━
+
+*Modification #{modification.id} has been rejected*
+
+*Reason:*
+{reason}
+
+━━━━━━━━━━━━━━━━━━━
+
+*Original booking remains unchanged.*
+"""
+    
+    return send_telegram_message(os.getenv("MANAGER_CHAT_ID"), message)
+
+def send_modification_details(modification, original_booking):
+    """Send detailed view of modification request"""
+    
+    # Create side-by-side comparison
+    comparison = f"""
+📋 *MODIFICATION DETAILS* #{modification.id}
+
+━━━━━━━━━━━━━━━━━━━
+
+*Field* │ *Original* │ *Requested*
+────────┼───────────┼──────────────
+👤 Name │ {original_booking.guest_name[:15]:15} │ {modification.guest_name[:15]:15}
+📅 In   │ {str(original_booking.arrival_date)} │ {str(modification.arrival_date)}
+📅 Out  │ {str(original_booking.departure_date)} │ {str(modification.departure_date)}
+🛏 Room │ {original_booking.room_type[:10]:10} │ {modification.room_type[:10]:10}
+🔢 Rooms│ {original_booking.number_of_rooms:10} │ {modification.number_of_rooms:10}
+👥 Guests│ {original_booking.number_of_guests:10} │ {modification.number_of_guests:10}
+
+━━━━━━━━━━━━━━━━━━━
+
+*Special Requests:*
+{modification.special_requests or "None"}
+
+*Original Special Requests:*
+{original_booking.special_requests or "None"}
+
+━━━━━━━━━━━━━━━━━━━
+*Created:* {modification.created_at}
+*Status:* {modification.status}
+"""
+    
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "✅ APPROVE", "callback_data": f"mod_approve_{modification.id}"},
+                {"text": "❌ REJECT", "callback_data": f"mod_reject_{modification.id}"}
+            ]
+        ]
+    }
+    
+    return send_telegram_message(os.getenv("MANAGER_CHAT_ID"), comparison, reply_markup=keyboard)
