@@ -316,6 +316,29 @@ async def handle_callback_query(callback, db: Session):
             await send_telegram_message(chat_id, "❌ Availability check cancelled.")
             return {"status": "success"}
         
+                # Handle cancellation confirmation
+        if callback_data.startswith("cancel_confirm_"):
+            booking_id = int(callback_data.replace("cancel_confirm_", ""))
+            booking = db.query(models.ConfirmedBooking).filter(models.ConfirmedBooking.id == booking_id).first()
+            
+            if booking:
+                # Delete or mark as cancelled
+                # You may need to add a "Cancelled" status to your model
+                booking.status = "Cancelled"
+                db.commit()
+                
+                await send_telegram_message(chat_id, f"✅ Booking #{booking_id} has been cancelled.")
+                await edit_message_text(chat_id, message_id, f"✅ Booking #{booking_id} CANCELLED")
+            else:
+                await send_telegram_message(chat_id, f"❌ Booking #{booking_id} not found.")
+            return {"status": "success"}
+
+        elif callback_data.startswith("cancel_abort_"):
+            booking_id = int(callback_data.replace("cancel_abort_", ""))
+            await send_telegram_message(chat_id, f"✅ Cancellation aborted. Booking #{booking_id} remains unchanged.")
+            await edit_message_text(chat_id, message_id, f"❌ Cancellation aborted for Booking #{booking_id}")
+            return {"status": "success"}
+        
         # Handle special actions without booking IDs (stats, today, pending, help)
         if callback_data in ["stats", "today", "pending", "help"]:
             if callback_data == "stats":
@@ -1279,10 +1302,21 @@ async def handle_text_message(message, db: Session):
             except:
                 pass
         
-        else:
-            # Not in editing mode - treat as a question
-            logger.info("No booking in editing mode, handling as question")
-            await handle_manager_question(chat_id, text, db)
+            else:
+            # Not in editing mode - try natural language processing first
+               logger.info("No booking in editing mode, trying natural language")
+            
+            # Check if it's a natural language query
+            from services.nlp_processor import nlp
+            parsed = nlp.parse_query(text)
+            
+            if parsed['intent'] and parsed.get('confidence', 0) > 0.5:
+                # High confidence match - use NLP
+                await handle_natural_language(chat_id, text, db)
+            else:
+                # Low confidence - fall back to Q&A
+                logger.info(f"Low confidence NLP match ({parsed.get('confidence', 0)}), falling back to Q&A")
+                await handle_manager_question(chat_id, text, db)
         
         return {"status": "message_processed"}
         
@@ -1421,13 +1455,23 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
             ]
         }
     
-    logger.info(f"Sending response message of length: {len(msg)}")
+        logger.info(f"Sending response message of length: {len(msg)}")
     logger.info(f"Response preview: {msg[:100]}...")
+    logger.info(f"Type of send_telegram_message: {type(send_telegram_message)}")
+    logger.info(f"send_telegram_message value: {send_telegram_message}")
     
     if room_type:
-        await send_telegram_message(chat_id, msg)
+        try:
+            result = await send_telegram_message(chat_id, msg)
+            logger.info(f"✅ Send result: {result}")
+        except Exception as e:
+            logger.error(f"❌ Error sending message: {e}", exc_info=True)
     else:
-        await send_telegram_message(chat_id, msg, reply_markup=keyboard)
+        try:
+            result = await send_telegram_message(chat_id, msg, reply_markup=keyboard)
+            logger.info(f"✅ Send result with keyboard: {result}")
+        except Exception as e:
+            logger.error(f"❌ Error sending message with keyboard: {e}", exc_info=True)
     
     logger.info("=== AVAILABILITY COMMAND COMPLETED ===")
 
