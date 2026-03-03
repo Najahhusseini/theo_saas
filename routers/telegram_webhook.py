@@ -1178,26 +1178,26 @@ async def handle_pending_command(chat_id: int, db: Session):
 async def handle_help_command(chat_id: int):
     """Handle /help command"""
     message = (
-        "🤖 **THeO Bot Help**\n\n"
-        "**Commands:**\n"
+        "🤖 **THeO Bot Commands**\n\n"
+        "**Booking Management:**\n"
         "/stats - View booking statistics\n"
         "/today - See today's arrivals/departures\n"
         "/pending - List pending bookings\n"
+        "/modify <id> - Start modification for a confirmed booking\n\n"
+        "**Availability & Reports:**\n"
+        "/availability YYYY-MM-DD [room_type] - Check room availability\n"
+        "/bookings YYYY-MM-DD YYYY-MM-DD - List bookings in date range\n\n"
+        "**General:**\n"
         "/help - Show this message\n\n"
-        "**Booking Management:**\n"
-        "• Click buttons on booking messages\n"
-        "• Reply to a draft to edit it\n"
-        "• Ask questions about hotel policies\n\n"
         "**Sample Questions:**\n"
         "• \"What's the check-in time?\"\n"
         "• \"Do you have parking?\"\n"
         "• \"Cancellation policy?\"\n"
         "• \"Breakfast included?\"\n"
-        "• \"Pet policy?\"\n"
-        "• \"WiFi password?\""
+        "• \"Pet policy?\""
     )
     
-    await send_telegram_message(chat_id, message)  # Add await here
+    await send_telegram_message(chat_id, message)
 
 async def edit_message_text(chat_id: int, message_id: int, text: str):
     """Helper to edit a Telegram message"""
