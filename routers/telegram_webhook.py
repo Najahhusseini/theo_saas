@@ -1477,25 +1477,37 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
 
 async def show_availability(chat_id: int, check_date: date, db: Session):
     """Helper function to show availability for a specific date"""
+    logger.info(f"📊 show_availability called for date: {check_date}")
+    logger.info(f"Type of send_telegram_message: {type(send_telegram_message)}")
+    logger.info(f"send_telegram_message value: {send_telegram_message}")
+    
     hotel_id = 1
     
     try:
         from services.availability import check_availability
+        logger.info("✅ Imported check_availability")
         
         # Check if room types exist
         room_types_count = db.query(models.RoomType).filter(models.RoomType.hotel_id == hotel_id).count()
+        logger.info(f"🏨 Room types found: {room_types_count}")
+        
         if room_types_count == 0:
+            logger.warning("❌ No room types found")
             await send_telegram_message(chat_id, "❌ No room types found. Please create room types first.")
             return
         
+        logger.info(f"🔍 Calling check_availability with date={check_date}")
         avail = check_availability(db, hotel_id, check_date, None)
+        logger.info(f"📊 Availability result: {avail}")
         
         if not avail:
             msg = f"📅 No availability data found for {check_date}."
+            logger.info("❌ No availability data")
         else:
             msg = f"📅 *Availability Summary for {check_date}*\n\n"
             for rt, data in avail.items():
                 msg += f"🏨 *{rt}*: {data['available']}/{data['total']} available ({data['guests']} guests)\n"
+            logger.info(f"✅ Generated message with {len(avail)} room types")
         
         # Add button to check another date
         keyboard = {
@@ -1504,12 +1516,18 @@ async def show_availability(chat_id: int, check_date: date, db: Session):
             ]
         }
         
-        await send_telegram_message(chat_id, msg, reply_markup=keyboard)
+        logger.info(f"About to send message with keyboard. Msg length: {len(msg)}")
+        result = await send_telegram_message(chat_id, msg, reply_markup=keyboard)
+        logger.info(f"✅ Send result: {result}")
         
     except Exception as e:
-        logger.error(f"Availability error: {e}")
-        await send_telegram_message(chat_id, "❌ Error checking availability.")
-
+        logger.error(f"❌ Availability error: {e}", exc_info=True)
+        logger.info(f"Trying to send error message...")
+        try:
+            result = await send_telegram_message(chat_id, "❌ Error checking availability.")
+            logger.info(f"✅ Error message sent: {result}")
+        except Exception as e2:
+            logger.error(f"❌ Even error message failed: {e2}", exc_info=True)
 async def handle_bookings_command(chat_id: int, args: str, db: Session):
     """Usage: /bookings YYYY-MM-DD YYYY-MM-DD"""
     parts = args.strip().split()
