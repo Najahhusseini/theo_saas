@@ -76,6 +76,43 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Webhook error: {str(e)}", exc_info=True)
         return {"status": "error", "message": str(e)}
+@router.post("/telegram/webhook")
+async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
+    # ALWAYS log everything
+    print("="*50)
+    print("WEBHOOK RECEIVED!")
+    print("="*50)
+    
+    try:
+        # Log raw request for debugging
+        body = await request.body()
+        print(f"RAW BODY: {body.decode('utf-8')}")
+        logger.info(f"Raw webhook received: {body.decode('utf-8')}")
+        
+        data = await request.json()
+        print(f"PARSED JSON: {json.dumps(data, indent=2)}")
+        logger.info(f"Parsed webhook: {json.dumps(data, indent=2)}")
+        
+        # Handle callback queries (button presses)
+        if "callback_query" in data:
+            print("✅ Processing callback query")
+            logger.info("Processing callback query")
+            return await handle_callback_query(data["callback_query"], db)
+        
+        # Handle text messages
+        elif "message" in data:
+            print("✅ Processing text message")
+            logger.info("Processing text message")
+            return await handle_text_message(data["message"], db)
+        
+        print("❌ Ignoring unknown update type")
+        logger.info("Ignoring unknown update type")
+        return {"status": "ignored_update"}
+    
+    except Exception as e:
+        print(f"❌ Webhook error: {e}")
+        logger.error(f"Webhook error: {str(e)}", exc_info=True)
+        return {"status": "error", "message": str(e)}
 
 # ==================== MODIFICATION ACTIONS ====================
 # Define this BEFORE handle_callback_query
