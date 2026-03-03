@@ -64,6 +64,7 @@ class BookingRequest(Base):
     hotel = relationship("Hotel", back_populates="booking_requests")
     draft_reply = Column(Text)
 
+
 class ConfirmedBooking(Base):
     __tablename__ = "confirmed_bookings"
 
@@ -85,7 +86,14 @@ class ConfirmedBooking(Base):
     # 🔥 AI Draft Email Storage
     ai_draft_email = Column(Text, nullable=True)
     
-# Add to models.py
+    # RELATIONSHIPS - Add these inside the existing class
+    # Add relationship to modifications
+    modifications = relationship("ModificationRequest", back_populates="original_booking", foreign_keys="ModificationRequest.original_booking_id")
+    
+    # Track modification status
+    has_pending_modification = Column(Boolean, default=False)
+    last_modified_at = Column(TIMESTAMP, nullable=True)
+
 
 class ModificationRequest(Base):
     """Track modification requests for confirmed bookings"""
@@ -120,6 +128,7 @@ class ModificationRequest(Base):
     # Notes
     modification_notes = Column(Text)
 
+
 class ModificationHistory(Base):
     """Track all changes made to bookings"""
     __tablename__ = "modification_history"
@@ -135,16 +144,3 @@ class ModificationHistory(Base):
     modified_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     modified_at = Column(TIMESTAMP, default=datetime.utcnow)
     modification_reason = Column(String)  # "guest_request", "manager_update", etc.
-
-# Update ConfirmedBooking to include relationship
-class ConfirmedBooking(Base):
-    __tablename__ = "confirmed_bookings"
-    
-    # ... existing fields ...
-    
-    # Add relationship to modifications
-    modifications = relationship("ModificationRequest", back_populates="original_booking")
-    
-    # Track modification status
-    has_pending_modification = Column(Boolean, default=False)
-    last_modified_at = Column(TIMESTAMP, nullable=True)
