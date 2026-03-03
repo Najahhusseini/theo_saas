@@ -599,6 +599,48 @@ def create_room_type(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
+# -------------------------
+# ROOM TYPE MANAGEMENT ENDPOINTS
+# -------------------------
+@app.get("/room-types/list")
+def list_room_types(db: Session = Depends(get_db)):
+    """List all room types"""
+    try:
+        room_types = db.query(models.RoomType).all()
+        if not room_types:
+            return {"message": "No room types found", "room_types": []}
+        
+        return [
+            {
+                "id": rt.id,
+                "name": rt.name,
+                "total_rooms": rt.total_rooms,
+                "hotel_id": rt.hotel_id
+            }
+            for rt in room_types
+        ]
+    except Exception as e:
+        logger.error(f"Error listing room types: {e}")
+        return {"error": str(e)}
+
+@app.get("/room-types/by-hotel/{hotel_id}")
+def get_room_types_by_hotel(hotel_id: int, db: Session = Depends(get_db)):
+    """Get room types for a specific hotel"""
+    try:
+        room_types = db.query(models.RoomType).filter(models.RoomType.hotel_id == hotel_id).all()
+        return [
+            {
+                "id": rt.id,
+                "name": rt.name,
+                "total_rooms": rt.total_rooms
+            }
+            for rt in room_types
+        ]
+    except Exception as e:
+        logger.error(f"Error getting room types: {e}")
+        return {"error": str(e)}
+    
+    
 @app.put("/room-types/{room_type_id}")
 def update_room_type(
     room_type_id: int,
