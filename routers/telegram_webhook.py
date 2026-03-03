@@ -18,6 +18,32 @@ import json
 import re
 from datetime import date
 
+# Add these helper functions after your imports
+def get_mode_indicator(chat_id: int, db: Session) -> str:
+    """Get the current mode indicator for a chat"""
+    # Check if any booking is in editing mode
+    editing_booking = db.query(models.BookingRequest).filter(
+        models.BookingRequest.status == "Editing"
+    ).first()
+    
+    if editing_booking:
+        return f"✏️ *EDITING MODE* - Editing Booking #{editing_booking.id}\nReply to this message with your revised draft.\nType /cancel to exit."
+    else:
+        return "💬 *Normal Mode* - Use commands or buttons to manage bookings."
+
+def is_editing_mode(db: Session) -> bool:
+    """Check if any booking is in editing mode"""
+    return db.query(models.BookingRequest).filter(
+        models.BookingRequest.status == "Editing"
+    ).first() is not None
+
+def get_editing_booking(db: Session):
+    """Get the booking currently in editing mode"""
+    return db.query(models.BookingRequest).filter(
+        models.BookingRequest.status == "Editing"
+    ).first()
+
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
@@ -192,31 +218,63 @@ async def handle_callback_query(callback, db: Session):
         elif action == "edit":
             logger.info(f"Processing edit action for booking {booking_id}")
             
-            # Put booking in editing mode
+            # First, check if another booking is already in editing mode
+            existing_edit = db.query(models.BookingRequest).filter(
+                models.BookingRequest.status == "Editing",
+                models.BookingRequest.id != booking_id
+            ).first()
+            
+            if existing_edit:
+                # Warn about conflicting edit
+                warning_message = (
+                    f"⚠️ *Cannot Enter Edit Mode*\n\n"
+                    f"Booking #{existing_edit.id} is already being edited.\n\n"
+                    f"Please finish editing that booking first or wait for it to timeout."
+                )
+                await send_telegram_message(chat_id, warning_message)
+                return {"status": "error", "message": "Another booking is in editing mode"}
+            
+            # Put this booking in editing mode
             booking.status = "Editing"
             db.commit()
             
-            # Send clear instructions to the manager
+            # Send clear instructions with mode indicator
             current_draft = booking.draft_reply or "No draft yet."
             
+            # Create a distinctive editing mode message
             instruction_message = (
-                f"✏️ **EDITING DRAFT for Booking #{booking.id}**\n\n"
-                f"**Current Draft:**\n"
+                f"✏️ *EDITING MODE ACTIVATED*\n"
+                f"{'━' * 25}\n\n"
+                f"*Booking #{booking.id} - {booking.guest_name}*\n\n"
+                f"*Current Draft:*\n"
                 f"```\n{current_draft}\n```\n\n"
-                f"**Instructions:**\n"
-                f"1. Type your revised message below\n"
-                f"2. Send it as a regular text message\n"
-                f"3. I'll update the draft and show you the result\n\n"
-                f"*Tip: You can copy the current draft above and modify it*"
+                f"*Instructions:*\n"
+                f"1️⃣ Reply directly to THIS message\n"
+                f"2️⃣ Send your revised draft\n"
+                f"3️⃣ I'll update and confirm\n\n"
+                f"*Commands in editing mode:*\n"
+                f"• /cancel - Exit edit mode\n"
+                f"• /help - Show help\n\n"
+                f"{'━' * 25}\n"
+                f"⏱️ *Edit mode will timeout in 30 minutes*"
             )
             
-            await send_telegram_message(chat_id, instruction_message)
+            # Send with a distinctive reply markup to indicate it's the edit session
+            edit_keyboard = {
+                "inline_keyboard": [
+                    [
+                        {"text": "❌ CANCEL EDIT", "callback_data": f"cancel_{booking.id}"}
+                    ]
+                ]
+            }
+            
+            await send_telegram_message(chat_id, instruction_message, reply_markup=edit_keyboard)
             
             # Update original message to show it's in editing mode
             await edit_message_text(
                 chat_id,
                 message_id,
-                f"✏️ **Booking #{booking.id} is now in EDIT MODE**\n\nPlease send your revised draft as a new message."
+                f"✏️ **Booking #{booking.id} is now in EDIT MODE**\n\nPlease reply to the edit instruction message above with your revised draft."
             )
         
         elif action == "send":
@@ -318,26 +376,67 @@ async def handle_text_message(message, db: Session):
         
         logger.info(f"Processing text message from chat {chat_id}: {text[:50]}...")
         
+        # Check if we're in editing mode
+        editing_booking = get_editing_booking(db)
+        in_editing_mode = editing_booking is not None
+        
         # Handle commands (starting with /)
         if text.startswith('/'):
             logger.info(f"Processing command: {text}")
             
+            # Commands available in both modes
+            if text == '/help':
+                if in_editing_mode:
+                    help_msg = (
+                        f"✏️ *Help (Editing Mode)*\n\n"
+                        f"Currently editing Booking #{editing_booking.id}\n\n"
+                        f"*Available commands:*\n"
+                        f"• /cancel - Exit edit mode\n"
+                        f"• /help - Show this message\n\n"
+                        f"*To edit:* Reply with your revised draft"
+                    )
+                    await send_telegram_message(chat_id, help_msg)
+                else:
+                    await handle_help_command(chat_id)
+                return {"status": "command_processed"}
+            
+            elif text == '/cancel':
+                if in_editing_mode:
+                    # Exit edit mode
+                    booking = editing_booking
+                    booking.status = "Pending"  # Revert to pending
+                    db.commit()
+                    
+                    await send_telegram_message(
+                        chat_id,
+                        f"✅ *Edit Mode Cancelled*\n\nBooking #{booking.id} has been returned to Pending status.\n\n💬 You are now in normal mode."
+                    )
+                    logger.info(f"Edit mode cancelled for booking #{booking.id}")
+                else:
+                    await send_telegram_message(
+                        chat_id,
+                        "ℹ️ You are not in edit mode. Click 'Edit Draft' on a booking to start editing."
+                    )
+                return {"status": "command_processed"}
+            
+            # Commands only available in normal mode
+            if in_editing_mode:
+                await send_telegram_message(
+                    chat_id,
+                    f"❌ Command not available in edit mode.\n\nYou are currently editing Booking #{editing_booking.id}.\n\nType /cancel to exit edit mode or /help for available commands."
+                )
+                return {"status": "command_blocked"}
+            
+            # Normal mode commands
             if text == '/stats':
                 await handle_stats_command(chat_id, db)
                 return {"status": "command_processed"}
-            
             elif text == '/today':
                 await handle_today_command(chat_id, db)
                 return {"status": "command_processed"}
-            
             elif text == '/pending':
                 await handle_pending_command(chat_id, db)
                 return {"status": "command_processed"}
-            
-            elif text == '/help':
-                await handle_help_command(chat_id)
-                return {"status": "command_processed"}
-            
             else:
                 await send_telegram_message(
                     chat_id, 
@@ -345,38 +444,33 @@ async def handle_text_message(message, db: Session):
                 )
                 return {"status": "command_processed"}
         
-        # Check if this is a reply to a specific message (for editing)
-        reply_to_message = message.get("reply_to_message")
-        
-        # Try to find a booking in editing mode
-        booking = None
-        
-        if reply_to_message:
-            # If it's a reply, try to extract booking ID from the replied message
-            reply_text = reply_to_message.get("text", "")
-            match = re.search(r'Booking #(\d+)', reply_text)
-            if match:
-                booking_id = int(match.group(1))
-                booking = db.query(models.BookingRequest).filter(
-                    models.BookingRequest.id == booking_id,
-                    models.BookingRequest.status == "Editing"
-                ).first()
-                if booking:
-                    logger.info(f"Found booking #{booking_id} from reply context")
-        
-        if not booking:
-            # Fallback: find any booking in editing mode
-            booking = db.query(models.BookingRequest).filter(
-                models.BookingRequest.status == "Editing"
-            ).first()
-            if booking:
-                logger.warning(f"Found booking #{booking.id} in editing mode (no reply context)")
-        
-        if booking:
-            # We have a booking to edit
-            logger.info(f"Processing edit for booking #{booking.id}")
+        # Not a command - check if we're in editing mode
+        if in_editing_mode:
+            # We're in editing mode - process as draft update
+            booking = editing_booking
+            
+            # Check if this is a reply to the edit instruction (optional but recommended)
+            reply_to_message = message.get("reply_to_message")
+            is_reply_to_edit = False
+            
+            if reply_to_message:
+                reply_text = reply_to_message.get("text", "")
+                if "EDITING MODE ACTIVATED" in reply_text or f"Booking #{booking.id}" in reply_text:
+                    is_reply_to_edit = True
+            
+            if not is_reply_to_edit:
+                # Warn that they should reply to the edit message
+                warning = (
+                    f"⚠️ *You're in edit mode*\n\n"
+                    f"You are currently editing Booking #{booking.id}.\n\n"
+                    f"Please reply to the edit instruction message with your revised draft.\n\n"
+                    f"Type /cancel to exit edit mode."
+                )
+                await send_telegram_message(chat_id, warning)
+                return {"status": "warning"}
             
             # Update the draft
+            logger.info(f"Processing edit for booking #{booking.id}")
             old_draft = booking.draft_reply
             booking.draft_reply = text
             booking.status = "Draft_Ready"
@@ -399,9 +493,12 @@ async def handle_text_message(message, db: Session):
             }
             
             confirmation_message = (
-                f"✅ **Draft Updated for Booking #{booking.id}**\n\n"
-                f"**New Draft:**\n"
+                f"✅ *Draft Updated Successfully*\n"
+                f"{'━' * 25}\n\n"
+                f"*Booking #{booking.id} - {booking.guest_name}*\n\n"
+                f"*New Draft:*\n"
                 f"```\n{text}\n```\n\n"
+                f"💬 *You are now in normal mode*\n\n"
                 f"What would you like to do next?"
             )
             
@@ -419,10 +516,10 @@ async def handle_text_message(message, db: Session):
                     "message_id": message_id
                 }, timeout=5)
             except:
-                pass  # Ignore if deletion fails
+                pass
         
         else:
-            # No booking in editing mode - treat as a question
+            # Not in editing mode - treat as a question
             logger.info("No booking in editing mode, handling as question")
             await handle_manager_question(chat_id, text, db)
         
