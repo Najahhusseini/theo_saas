@@ -1,3 +1,10 @@
+from services.templates import (
+    booking_details_template, 
+    stats_template, 
+    today_template,
+    help_template
+)
+from services.telegram import send_stats_dashboard, send_today_summary
 from fastapi import APIRouter, Request, Depends
 from sqlalchemy.orm import Session
 from database import get_db
@@ -65,13 +72,69 @@ async def handle_callback_query(callback, db: Session):
         # Handle special actions without booking IDs (stats, today, pending, help)
         if callback_data in ["stats", "today", "pending", "help"]:
             if callback_data == "stats":
-                await handle_stats_command(chat_id, db)
+                logger.info("Processing stats command from callback")
+                
+                # Gather comprehensive statistics
+                total = db.query(models.BookingRequest).count()
+                pending = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Pending").count()
+                confirmed = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Confirmed").count()
+                waitlist = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Waitlist").count()
+                rejected = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Rejected").count()
+                draft_ready = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Draft_Ready").count()
+                email_sent = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Email_Sent").count()
+                
+                today = date.today()
+                today_arrivals = db.query(models.BookingRequest).filter(
+                    models.BookingRequest.arrival_date == today
+                ).count()
+                today_departures = db.query(models.BookingRequest).filter(
+                    models.BookingRequest.departure_date == today
+                ).count()
+                
+                # Calculate response rate
+                responded = confirmed + rejected + waitlist
+                response_rate = f"{(responded/total*100):.1f}%" if total > 0 else "0%"
+                
+                stats = {
+                    'total': total,
+                    'pending': pending,
+                    'confirmed': confirmed,
+                    'waitlist': waitlist,
+                    'rejected': rejected,
+                    'draft_ready': draft_ready,
+                    'email_sent': email_sent,
+                    'today_arrivals': today_arrivals,
+                    'today_departures': today_departures,
+                    'response_rate': response_rate
+                }
+                
+                # Use the new professional stats dashboard
+                await send_stats_dashboard(chat_id, stats)
+                
             elif callback_data == "today":
-                await handle_today_command(chat_id, db)
+                logger.info("Processing today command from callback")
+                
+                today = date.today()
+                
+                arrivals = db.query(models.BookingRequest).filter(
+                    models.BookingRequest.arrival_date == today
+                ).all()
+                
+                departures = db.query(models.BookingRequest).filter(
+                    models.BookingRequest.departure_date == today
+                ).all()
+                
+                # Use the new professional today summary
+                await send_today_summary(chat_id, arrivals, departures)
+                
             elif callback_data == "pending":
+                logger.info("Processing pending command from callback")
                 await handle_pending_command(chat_id, db)
+                
             elif callback_data == "help":
+                logger.info("Processing help command from callback")
                 await handle_help_command(chat_id)
+                
             return {"status": "success"}
         
         # Parse callback data with booking ID (format: action_bookingId)
@@ -471,15 +534,19 @@ async def handle_stats_command(chat_id: int, db: Session):
     pending = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Pending").count()
     confirmed = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Confirmed").count()
     waitlist = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Waitlist").count()
+    rejected = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Rejected").count()
     draft_ready = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Draft_Ready").count()
+    email_sent = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Email_Sent").count()
     
     message = (
         f"📊 **Booking Statistics**\n\n"
         f"Total: {total}\n"
-        f"⏳ Pending: {pending}\n"
         f"✅ Confirmed: {confirmed}\n"
+        f"⏳ Pending: {pending}\n"
         f"⏱ Waitlist: {waitlist}\n"
-        f"📝 Draft Ready: {draft_ready}"
+        f"❌ Rejected: {rejected}\n"
+        f"📝 Draft Ready: {draft_ready}\n"
+        f"📧 Email Sent: {email_sent}"
     )
     
     await send_telegram_message(chat_id, message)
@@ -492,12 +559,29 @@ async def handle_today_command(chat_id: int, db: Session):
         models.BookingRequest.arrival_date == today
     ).all()
     
+    departures = db.query(models.BookingRequest).filter(
+        models.BookingRequest.departure_date == today
+    ).all()
+    
+    message = f"📅 **Today's Overview ({today})**\n\n"
+    
     if arrivals:
-        message = f"📅 **Today's Arrivals ({today})**\n\n"
-        for b in arrivals:
-            message += f"• #{b.id}: {b.guest_name} - {b.room_type} ({b.number_of_guests} guests)\n"
+        message += f"*🛬 Arrivals ({len(arrivals)}):*\n"
+        for b in arrivals[:5]:
+            message += f"• #{b.id}: {b.guest_name} - {b.room_type}\n"
+        if len(arrivals) > 5:
+            message += f"  ... and {len(arrivals) - 5} more\n"
     else:
-        message = f"📅 No arrivals scheduled for today ({today})"
+        message += "*🛬 Arrivals:* None\n"
+    
+    if departures:
+        message += f"\n*🛫 Departures ({len(departures)}):*\n"
+        for b in departures[:5]:
+            message += f"• #{b.id}: {b.guest_name}\n"
+        if len(departures) > 5:
+            message += f"  ... and {len(departures) - 5} more\n"
+    else:
+        message += "\n*🛫 Departures:* None\n"
     
     await send_telegram_message(chat_id, message)
 
@@ -524,7 +608,7 @@ async def handle_help_command(chat_id: int):
         "🤖 **THeO Bot Help**\n\n"
         "**Commands:**\n"
         "/stats - View booking statistics\n"
-        "/today - See today's arrivals\n"
+        "/today - See today's arrivals/departures\n"
         "/pending - List pending bookings\n"
         "/help - Show this message\n\n"
         "**Booking Management:**\n"
@@ -535,7 +619,9 @@ async def handle_help_command(chat_id: int):
         "• \"What's the check-in time?\"\n"
         "• \"Do you have parking?\"\n"
         "• \"Cancellation policy?\"\n"
-        "• \"Breakfast included?\""
+        "• \"Breakfast included?\"\n"
+        "• \"Pet policy?\"\n"
+        "• \"WiFi password?\""
     )
     
     await send_telegram_message(chat_id, message)
