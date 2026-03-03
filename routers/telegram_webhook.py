@@ -1076,7 +1076,7 @@ async def handle_stats_command(chat_id: int, db: Session):
         f"📧 Email Sent: {email_sent}"
     )
     
-    await send_telegram_message(chat_id, message)
+    await send_telegram_message(chat_id, message)  # Make sure this has await
 
 async def handle_today_command(chat_id: int, db: Session):
     """Handle /today command"""
@@ -1110,7 +1110,7 @@ async def handle_today_command(chat_id: int, db: Session):
     else:
         message += "\n*🛫 Departures:* None\n"
     
-    await send_telegram_message(chat_id, message)
+    await send_telegram_message(chat_id, message)  # Add await here
 
 async def handle_pending_command(chat_id: int, db: Session):
     """Handle /pending command"""
@@ -1127,7 +1127,7 @@ async def handle_pending_command(chat_id: int, db: Session):
     else:
         message = "✅ No pending bookings!"
     
-    await send_telegram_message(chat_id, message)
+    await send_telegram_message(chat_id, message)  # Add await here
 
 async def handle_help_command(chat_id: int):
     """Handle /help command"""
