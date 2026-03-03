@@ -514,4 +514,4 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Run on application shutdown"""
-    logger.info("THeO Application Shutting Down - Version 2.0")
+    logger.info("THeO Application Shutting Down - Version 2.0")"# Force rebuild" 
