@@ -37,6 +37,7 @@ class RoomType(Base):
 
     hotel_id = Column(Integer, ForeignKey("hotels.id"))
     hotel = relationship("Hotel", back_populates="room_types")
+    bookings = relationship("ConfirmedBooking", back_populates="room_type_ref")
 
 
 class BookingRequest(Base):
@@ -88,6 +89,8 @@ class ConfirmedBooking(Base):
     # New fields for modification tracking
     has_pending_modification = Column(Boolean, default=False)
     last_modified_at = Column(TIMESTAMP, nullable=True)
+    room_type_id = Column(Integer, ForeignKey("room_types.id"), nullable=True)  # link to room type
+    room_type_ref = relationship("RoomType", back_populates="bookings")
 
 
 class ModificationRequest(Base):
