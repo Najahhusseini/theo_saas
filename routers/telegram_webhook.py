@@ -16,7 +16,7 @@ import requests
 import os
 import json
 import re
-from datetime import date, datetime  # Added datetime import
+from datetime import date, datetime, timedelta
 
 # Add these helper functions after your imports
 def get_mode_indicator(chat_id: int, db: Session) -> str:
@@ -94,6 +94,26 @@ async def handle_callback_query(callback, db: Session):
             logger.info("Callback answered successfully")
         except Exception as e:
             logger.error(f"Failed to answer callback: {e}")
+        
+        # Handle availability date selection
+        if callback_data.startswith("avail_date_"):
+            date_str = callback_data.replace("avail_date_", "")
+            try:
+                selected_date = date.fromisoformat(date_str)
+                await show_availability(chat_id, selected_date, db)
+            except Exception as e:
+                logger.error(f"Date selection error: {e}")
+                await send_telegram_message(chat_id, "❌ Invalid date selected.")
+            return {"status": "success"}
+
+        elif callback_data == "avail_another":
+            # Show date selection again
+            await handle_availability_command(chat_id, "", db)
+            return {"status": "success"}
+
+        elif callback_data == "avail_cancel":
+            await send_telegram_message(chat_id, "❌ Availability check cancelled.")
+            return {"status": "success"}
         
         # Handle special actions without booking IDs (stats, today, pending, help)
         if callback_data in ["stats", "today", "pending", "help"]:
@@ -502,8 +522,6 @@ async def handle_modification_actions(action: str, modification_id: int, chat_id
         )
         
         # Store modification ID in a way we can retrieve later
-        # For simplicity, we'll use a global dict (not ideal for production)
-        # In production, you'd want to store this in a cache or database
         if not hasattr(handle_modification_actions, "pending_rejections"):
             handle_modification_actions.pending_rejections = {}
         handle_modification_actions.pending_rejections[chat_id] = modification_id
@@ -656,7 +674,7 @@ async def handle_text_message(message, db: Session):
                 )
                 return {"status": "command_blocked"}
             
-                        # Normal mode commands
+            # Normal mode commands
             if text == '/stats':
                 await handle_stats_command(chat_id, db)
                 return {"status": "command_processed"}
@@ -767,8 +785,9 @@ async def handle_text_message(message, db: Session):
     except Exception as e:
         logger.error(f"Error in handle_text_message: {str(e)}", exc_info=True)
         return {"status": "error", "message": str(e)}
+
 async def handle_availability_command(chat_id: int, args: str, db: Session):
-    """Usage: /availability YYYY-MM-DD [room_type]"""
+    """Usage: /availability [YYYY-MM-DD] [room_type]"""
     logger.info(f"=== AVAILABILITY COMMAND STARTED ===")
     logger.info(f"Raw args: '{args}'")
     logger.info(f"Chat ID: {chat_id}")
@@ -776,16 +795,46 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
     parts = args.strip().split()
     logger.info(f"Parsed parts: {parts}")
     
+    # If no date provided, show interactive date selection
     if not parts:
-        logger.info("No parts provided, sending usage message")
-        await send_telegram_message(chat_id, 
-            "📅 *Availability Command*\n\n"
-            "Usage: `/availability YYYY-MM-DD [room_type]`\n"
-            "Example: `/availability 2026-03-05`\n"
-            "Example: `/availability 2026-03-05 Deluxe`"
+        logger.info("No parts provided, showing date picker")
+        
+        # Create buttons for next 7 days
+        today = datetime.now().date()
+        keyboard = {
+            "inline_keyboard": []
+        }
+        
+        # Add rows of 3 dates each
+        row = []
+        for i in range(7):
+            date = today + timedelta(days=i)
+            date_str = date.strftime("%Y-%m-%d")
+            display = date.strftime("%d %b")  # Shows "05 Mar"
+            
+            row.append({
+                "text": display,
+                "callback_data": f"avail_date_{date_str}"
+            })
+            
+            # Create new row every 3 buttons
+            if len(row) == 3 or i == 6:
+                keyboard["inline_keyboard"].append(row)
+                row = []
+        
+        # Add cancel button
+        keyboard["inline_keyboard"].append([
+            {"text": "❌ Cancel", "callback_data": "avail_cancel"}
+        ])
+        
+        await send_telegram_message(
+            chat_id,
+            "📅 *Select a date to check availability:*",
+            reply_markup=keyboard
         )
         return
     
+    # If date provided, check availability
     try:
         check_date = date.fromisoformat(parts[0])
         logger.info(f"Parsed date: {check_date}")
@@ -860,12 +909,58 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
             msg = f"📅 *Availability Summary for {check_date}*\n\n"
             for rt, data in avail.items():
                 msg += f"🏨 *{rt}*: {data['available']}/{data['total']} available ({data['guests']} guests)\n"
+        
+        # Add button to check another date
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "📅 Check Another Date", "callback_data": "avail_another"}]
+            ]
+        }
     
     logger.info(f"Sending response message of length: {len(msg)}")
     logger.info(f"Response preview: {msg[:100]}...")
     
-    await send_telegram_message(chat_id, msg)
+    if room_type:
+        await send_telegram_message(chat_id, msg)
+    else:
+        await send_telegram_message(chat_id, msg, reply_markup=keyboard)
+    
     logger.info("=== AVAILABILITY COMMAND COMPLETED ===")
+
+async def show_availability(chat_id: int, check_date: date, db: Session):
+    """Helper function to show availability for a specific date"""
+    hotel_id = 1
+    
+    try:
+        from services.availability import check_availability
+        
+        # Check if room types exist
+        room_types_count = db.query(models.RoomType).filter(models.RoomType.hotel_id == hotel_id).count()
+        if room_types_count == 0:
+            await send_telegram_message(chat_id, "❌ No room types found. Please create room types first.")
+            return
+        
+        avail = check_availability(db, hotel_id, check_date, None)
+        
+        if not avail:
+            msg = f"📅 No availability data found for {check_date}."
+        else:
+            msg = f"📅 *Availability Summary for {check_date}*\n\n"
+            for rt, data in avail.items():
+                msg += f"🏨 *{rt}*: {data['available']}/{data['total']} available ({data['guests']} guests)\n"
+        
+        # Add button to check another date
+        keyboard = {
+            "inline_keyboard": [
+                [{"text": "📅 Check Another Date", "callback_data": "avail_another"}]
+            ]
+        }
+        
+        await send_telegram_message(chat_id, msg, reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error(f"Availability error: {e}")
+        await send_telegram_message(chat_id, "❌ Error checking availability.")
 
 async def handle_bookings_command(chat_id: int, args: str, db: Session):
     """Usage: /bookings YYYY-MM-DD YYYY-MM-DD"""
@@ -1122,7 +1217,7 @@ async def handle_stats_command(chat_id: int, db: Session):
         f"📧 Email Sent: {email_sent}"
     )
     
-    await send_telegram_message(chat_id, message)  # Make sure this has await
+    await send_telegram_message(chat_id, message)
 
 async def handle_today_command(chat_id: int, db: Session):
     """Handle /today command"""
@@ -1156,7 +1251,7 @@ async def handle_today_command(chat_id: int, db: Session):
     else:
         message += "\n*🛫 Departures:* None\n"
     
-    await send_telegram_message(chat_id, message)  # Add await here
+    await send_telegram_message(chat_id, message)
 
 async def handle_pending_command(chat_id: int, db: Session):
     """Handle /pending command"""
@@ -1173,7 +1268,7 @@ async def handle_pending_command(chat_id: int, db: Session):
     else:
         message = "✅ No pending bookings!"
     
-    await send_telegram_message(chat_id, message)  # Add await here
+    await send_telegram_message(chat_id, message)
 
 async def handle_help_command(chat_id: int):
     """Handle /help command"""
@@ -1185,7 +1280,7 @@ async def handle_help_command(chat_id: int):
         "/pending - List pending bookings\n"
         "/modify <id> - Start modification for a confirmed booking\n\n"
         "**Availability & Reports:**\n"
-        "/availability YYYY-MM-DD [room_type] - Check room availability\n"
+        "/availability [date] - Check room availability (interactive)\n"
         "/bookings YYYY-MM-DD YYYY-MM-DD - List bookings in date range\n\n"
         "**General:**\n"
         "/help - Show this message\n\n"
