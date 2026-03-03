@@ -20,7 +20,8 @@ from auth import (
 from routers.bookings import router as bookings_router
 from routers.confirmed_bookings import router as confirmed_router
 from routers.telegram_webhook import router as telegram_router
-from routers.modifications import router as modifications_router  # NEW IMPORT
+from routers import modifications
+modifications_router = modifications.router
 
 # -------------------------
 # SETUP LOGGING
