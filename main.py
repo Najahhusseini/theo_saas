@@ -1,6 +1,7 @@
 import os
 import logging
 from dotenv import load_dotenv
+from datetime import datetime
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
@@ -19,6 +20,7 @@ from auth import (
 from routers.bookings import router as bookings_router
 from routers.confirmed_bookings import router as confirmed_router
 from routers.telegram_webhook import router as telegram_router
+from routers.modifications import router as modifications_router  # NEW IMPORT
 
 # -------------------------
 # SETUP LOGGING
@@ -61,14 +63,15 @@ except Exception as e:
 # -------------------------
 app = FastAPI(
     title="THeO Hotel Booking Automation",
-    description="API for hotel booking automation system with Telegram integration",
-    version="1.0.0"
+    description="API for hotel booking automation system with Telegram integration and modification tracking",
+    version="2.0.0"  # Updated version
 )
 
 # Include routers
 app.include_router(bookings_router)
 app.include_router(confirmed_router)
 app.include_router(telegram_router)
+app.include_router(modifications_router)  # NEW ROUTER
 
 # -------------------------
 # MIDDLEWARE
@@ -89,16 +92,24 @@ def read_root():
     """Root endpoint with API information"""
     return {
         "message": "THeO SaaS Backend is running",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "endpoints": {
             "docs": "/docs",
             "health": "/health",
             "telegram_webhook": "/telegram/webhook",
             "bookings": "/booking-requests",
             "confirmed_bookings": "/confirmed-bookings",
+            "modifications": "/modifications",  # NEW ENDPOINT
             "hotels": "/hotels/",
             "users": "/users/",
             "login": "/login"
+        },
+        "features": {
+            "booking_management": True,
+            "telegram_integration": True,
+            "modification_tracking": True,  # NEW FEATURE
+            "ai_drafts": True,
+            "manager_qa": True
         }
     }
 
@@ -109,11 +120,11 @@ def read_root():
 def health_check(db: Session = Depends(get_db)):
     """Health check endpoint for Railway monitoring"""
     from sqlalchemy import text
-    from datetime import datetime
     
     health_status = {
         "status": "healthy",
         "timestamp": str(datetime.utcnow()),
+        "version": "2.0.0",
         "environment": {
             "telegram_token_set": bool(TELEGRAM_BOT_TOKEN),
             "manager_chat_id_set": bool(MANAGER_CHAT_ID),
@@ -121,16 +132,23 @@ def health_check(db: Session = Depends(get_db)):
         }
     }
     
-    # Test database connection - FIXED SYNTAX
+    # Test database connection
     try:
-        # Use text() for raw SQL
         db.execute(text("SELECT 1"))
         health_status["database"] = "connected"
+        
+        # Check if new tables exist
+        try:
+            modification_count = db.query(models.ModificationRequest).count()
+            health_status["modifications_table"] = "present"
+        except:
+            health_status["modifications_table"] = "missing"
+            
     except Exception as e:
         health_status["database"] = f"error: {str(e)}"
         health_status["status"] = "degraded"
     
-    # Test Telegram bot token format (basic check)
+    # Test Telegram bot token format
     if TELEGRAM_BOT_TOKEN:
         if ":" in TELEGRAM_BOT_TOKEN:
             health_status["telegram_token_format"] = "valid"
@@ -232,7 +250,7 @@ def test_telegram_connection():
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
             json={
                 "chat_id": MANAGER_CHAT_ID,
-                "text": "🔧 Test message from THeO bot\n\nIf you see this, the connection is working!"
+                "text": "🔧 Test message from THeO bot v2.0\n\nModification tracking feature added!"
             }
         ).json()
     except Exception as e:
@@ -407,6 +425,40 @@ def get_current_user_info(current_user: models.User = Depends(get_current_user))
     }
 
 # -------------------------
+# MODIFICATION STATS ENDPOINT
+# -------------------------
+@app.get("/modifications/stats")
+def get_modification_stats(db: Session = Depends(get_db)):
+    """Get statistics about modification requests"""
+    try:
+        total = db.query(models.ModificationRequest).count()
+        pending = db.query(models.ModificationRequest).filter(
+            models.ModificationRequest.status == "Pending"
+        ).count()
+        approved = db.query(models.ModificationRequest).filter(
+            models.ModificationRequest.status == "Approved"
+        ).count()
+        rejected = db.query(models.ModificationRequest).filter(
+            models.ModificationRequest.status == "Rejected"
+        ).count()
+        
+        # Get bookings with pending modifications
+        bookings_with_pending = db.query(models.ConfirmedBooking).filter(
+            models.ConfirmedBooking.has_pending_modification == True
+        ).count()
+        
+        return {
+            "total_modifications": total,
+            "pending": pending,
+            "approved": approved,
+            "rejected": rejected,
+            "bookings_with_pending": bookings_with_pending
+        }
+    except Exception as e:
+        logger.error(f"Error getting modification stats: {e}")
+        return {"error": str(e)}
+
+# -------------------------
 # ERROR HANDLERS
 # -------------------------
 @app.exception_handler(HTTPException)
@@ -427,9 +479,6 @@ async def general_exception_handler(request: Request, exc: Exception):
         content={"detail": "Internal server error"}
     )
 
-# Import datetime for health check
-from datetime import datetime
-
 # -------------------------
 # STARTUP EVENT
 # -------------------------
@@ -437,7 +486,7 @@ from datetime import datetime
 async def startup_event():
     """Run on application startup"""
     logger.info("="*50)
-    logger.info("THeO Application Starting Up")
+    logger.info("THeO Application Starting Up - Version 2.0")
     logger.info("="*50)
     
     # Log environment status
@@ -464,4 +513,4 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Run on application shutdown"""
-    logger.info("THeO Application Shutting Down")
+    logger.info("THeO Application Shutting Down - Version 2.0")
