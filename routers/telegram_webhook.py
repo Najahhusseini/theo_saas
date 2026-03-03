@@ -769,8 +769,15 @@ async def handle_text_message(message, db: Session):
         return {"status": "error", "message": str(e)}
 async def handle_availability_command(chat_id: int, args: str, db: Session):
     """Usage: /availability YYYY-MM-DD [room_type]"""
+    logger.info(f"=== AVAILABILITY COMMAND STARTED ===")
+    logger.info(f"Raw args: '{args}'")
+    logger.info(f"Chat ID: {chat_id}")
+    
     parts = args.strip().split()
+    logger.info(f"Parsed parts: {parts}")
+    
     if not parts:
+        logger.info("No parts provided, sending usage message")
         await send_telegram_message(chat_id, 
             "📅 *Availability Command*\n\n"
             "Usage: `/availability YYYY-MM-DD [room_type]`\n"
@@ -781,21 +788,51 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
     
     try:
         check_date = date.fromisoformat(parts[0])
-    except ValueError:
+        logger.info(f"Parsed date: {check_date}")
+    except ValueError as e:
+        logger.error(f"Date parsing error: {e}")
         await send_telegram_message(chat_id, "❌ Invalid date format. Use YYYY-MM-DD (e.g., 2026-03-05)")
         return
     
     room_type = parts[1] if len(parts) > 1 else None
+    logger.info(f"Room type filter: {room_type}")
     
     # Get hotel_id from context (using 1 as default for now)
     hotel_id = 1
+    logger.info(f"Using hotel_id: {hotel_id}")
     
     try:
+        # Import here to avoid circular imports
         from services.availability import check_availability
+        logger.info("Successfully imported check_availability")
+        
+        # First, check if any room types exist
+        room_types_count = db.query(models.RoomType).filter(models.RoomType.hotel_id == hotel_id).count()
+        logger.info(f"Room types found for hotel {hotel_id}: {room_types_count}")
+        
+        if room_types_count == 0:
+            logger.warning("No room types found!")
+            await send_telegram_message(chat_id, 
+                "❌ No room types found for this hotel. Please create room types first using the API.")
+            return
+        
+        # Log all room types
+        all_room_types = db.query(models.RoomType).filter(models.RoomType.hotel_id == hotel_id).all()
+        logger.info(f"Room types: {[{'name': rt.name, 'total': rt.total_rooms} for rt in all_room_types]}")
+        
+        # Check availability
+        logger.info(f"Calling check_availability with date={check_date}, room_type={room_type}")
         avail = check_availability(db, hotel_id, check_date, room_type)
+        logger.info(f"Availability result type: {type(avail)}")
+        logger.info(f"Availability result: {avail}")
+        
+    except ImportError as e:
+        logger.error(f"Import error: {e}", exc_info=True)
+        await send_telegram_message(chat_id, f"❌ System error: availability module not found")
+        return
     except Exception as e:
-        logger.error(f"Availability check error: {e}")
-        await send_telegram_message(chat_id, "❌ Error checking availability. Please try again.")
+        logger.error(f"Availability check error: {str(e)}", exc_info=True)
+        await send_telegram_message(chat_id, f"❌ Error checking availability: {str(e)}")
         return
 
     if room_type:
@@ -810,16 +847,25 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
                 f"👥 Guests: {data['guests']} checking in"
             )
         else:
-            msg = f"❌ Room type '{room_type}' not found for this date."
+            # List available room types
+            if avail:
+                available_types = list(avail.keys())
+                msg = f"❌ Room type '{room_type}' not found. Available types: {', '.join(available_types)}"
+            else:
+                msg = f"❌ No room types found for {check_date}."
     else:
         if not avail:
-            msg = f"📅 No room types found for {check_date}."
+            msg = f"📅 No availability data found for {check_date}."
         else:
             msg = f"📅 *Availability Summary for {check_date}*\n\n"
             for rt, data in avail.items():
                 msg += f"🏨 *{rt}*: {data['available']}/{data['total']} available ({data['guests']} guests)\n"
     
+    logger.info(f"Sending response message of length: {len(msg)}")
+    logger.info(f"Response preview: {msg[:100]}...")
+    
     await send_telegram_message(chat_id, msg)
+    logger.info("=== AVAILABILITY COMMAND COMPLETED ===")
 
 async def handle_bookings_command(chat_id: int, args: str, db: Session):
     """Usage: /bookings YYYY-MM-DD YYYY-MM-DD"""
@@ -1151,7 +1197,7 @@ async def handle_help_command(chat_id: int):
         "• \"WiFi password?\""
     )
     
-    await send_telegram_message(chat_id, message)
+    await send_telegram_message(chat_id, message)  # Add await here
 
 async def edit_message_text(chat_id: int, message_id: int, text: str):
     """Helper to edit a Telegram message"""
