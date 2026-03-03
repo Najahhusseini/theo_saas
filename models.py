@@ -83,27 +83,20 @@ class ConfirmedBooking(Base):
     number_of_guests = Column(Integer)
 
     special_requests = Column(String)
-    # 🔥 AI Draft Email Storage
     ai_draft_email = Column(Text, nullable=True)
     
-    # RELATIONSHIPS - Add these inside the existing class
-    # Add relationship to modifications
-    modifications = relationship("ModificationRequest", back_populates="original_booking", foreign_keys="ModificationRequest.original_booking_id")
-    
-    # Track modification status
+    # New fields for modification tracking
     has_pending_modification = Column(Boolean, default=False)
     last_modified_at = Column(TIMESTAMP, nullable=True)
 
 
 class ModificationRequest(Base):
-    """Track modification requests for confirmed bookings"""
     __tablename__ = "modification_requests"
 
     id = Column(Integer, primary_key=True, index=True)
     
     # Link to original confirmed booking
     original_booking_id = Column(Integer, ForeignKey("confirmed_bookings.id"))
-    original_booking = relationship("ConfirmedBooking", back_populates="modifications")
     
     # New requested changes
     guest_name = Column(String)
@@ -130,7 +123,6 @@ class ModificationRequest(Base):
 
 
 class ModificationHistory(Base):
-    """Track all changes made to bookings"""
     __tablename__ = "modification_history"
     
     id = Column(Integer, primary_key=True, index=True)
@@ -144,3 +136,21 @@ class ModificationHistory(Base):
     modified_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     modified_at = Column(TIMESTAMP, default=datetime.utcnow)
     modification_reason = Column(String)  # "guest_request", "manager_update", etc.
+
+
+# Add relationships AFTER all classes are defined
+# This prevents circular import issues
+
+# ConfirmedBooking relationships
+ConfirmedBooking.modifications = relationship(
+    "ModificationRequest", 
+    back_populates="original_booking",
+    foreign_keys="ModificationRequest.original_booking_id"
+)
+
+# ModificationRequest relationships
+ModificationRequest.original_booking = relationship(
+    "ConfirmedBooking", 
+    back_populates="modifications",
+    foreign_keys="ModificationRequest.original_booking_id"
+)
