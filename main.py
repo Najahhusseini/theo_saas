@@ -508,6 +508,37 @@ async def startup_event():
     
     logger.info("="*50)
 
+@app.post("/room-types/create-test")
+def create_test_room_types(db: Session = Depends(get_db)):
+    """Create test room types for hotel_id=1"""
+    try:
+        # Check if room types already exist
+        existing = db.query(models.RoomType).filter(models.RoomType.hotel_id == 1).count()
+        if existing > 0:
+            return {"message": f"Room types already exist ({existing} found)"}
+        
+        # Create standard room types
+        room_types = [
+            models.RoomType(name="Standard", total_rooms=20, hotel_id=1),
+            models.RoomType(name="Deluxe", total_rooms=15, hotel_id=1),
+            models.RoomType(name="Suite", total_rooms=10, hotel_id=1),
+            models.RoomType(name="Family", total_rooms=8, hotel_id=1)
+        ]
+        
+        for rt in room_types:
+            db.add(rt)
+        
+        db.commit()
+        
+        return {
+            "message": "Test room types created successfully",
+            "room_types": [{"name": rt.name, "total_rooms": rt.total_rooms} for rt in room_types]
+        }
+    except Exception as e:
+        logger.error(f"Error creating room types: {e}")
+        db.rollback()
+        return {"error": str(e)}
+
 # -------------------------
 # SHUTDOWN EVENT
 # -------------------------
