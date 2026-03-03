@@ -58,6 +58,7 @@ def get_daily_occupancy(
         return {}
 
     # Get all confirmed bookings that overlap the date range
+    # FIXED: Removed the reference to room_type_id which doesn't exist
     bookings = db.query(models.ConfirmedBooking).filter(
         models.ConfirmedBooking.hotel_id == hotel_id,
         models.ConfirmedBooking.arrival_date <= end_date,
@@ -76,6 +77,7 @@ def get_daily_occupancy(
             booked_rooms = 0
             total_guests = 0
             for b in bookings:
+                # Use room_type string field instead of room_type_id
                 if b.room_type == rt.name and b.arrival_date <= d < b.departure_date:
                     booked_rooms += b.number_of_rooms
                     total_guests += b.number_of_guests
