@@ -1515,6 +1515,8 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
 async def show_availability(chat_id: int, check_date: date, db: Session):
     """Helper function to show availability for a specific date"""
     logger.info(f"📊 show_availability called for date: {check_date}")
+    
+    # DEBUG: Check what send_telegram_message is
     logger.info(f"Type of send_telegram_message: {type(send_telegram_message)}")
     logger.info(f"send_telegram_message value: {send_telegram_message}")
     
@@ -1554,11 +1556,35 @@ async def show_availability(chat_id: int, check_date: date, db: Session):
         }
         
         logger.info(f"About to send message with keyboard. Msg length: {len(msg)}")
-        result = await send_telegram_message(chat_id, msg, reply_markup=keyboard)
-        logger.info(f"✅ Send result: {result}")
+        
+        # Try to send the message
+        try:
+            # Import the function directly to avoid any namespace issues
+            from services.telegram import send_telegram_message as send_msg
+            result = await send_msg(chat_id, msg, reply_markup=keyboard)
+            logger.info(f"✅ Message sent successfully: {result}")
+        except Exception as e:
+            logger.error(f"❌ Error sending message: {e}", exc_info=True)
+            # Try one more time with the original function name
+            try:
+                result = await send_telegram_message(chat_id, msg, reply_markup=keyboard)
+                logger.info(f"✅ Second attempt succeeded: {result}")
+            except Exception as e2:
+                logger.error(f"❌ Second attempt also failed: {e2}", exc_info=True)
+                # Send a simple text message as fallback
+                try:
+                    fallback_msg = f"Availability for {check_date}:\n"
+                    for rt, data in avail.items():
+                        fallback_msg += f"{rt}: {data['available']}/{data['total']}\n"
+                    await send_telegram_message(chat_id, fallback_msg)
+                    logger.info("✅ Fallback message sent")
+                except:
+                    logger.error("❌ All sending attempts failed")
         
     except Exception as e:
         logger.error(f"❌ Availability error: {e}", exc_info=True)
+        # Don't send error message to user - just log it
+        pass
         # Only send error if we haven't already sent a response
         if 'msg' not in locals():
             await send_telegram_message(chat_id, "❌ Sorry, I couldn't check availability right now. Please try again later.")
