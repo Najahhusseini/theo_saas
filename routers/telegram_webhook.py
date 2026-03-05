@@ -50,6 +50,7 @@ logger = logging.getLogger(__name__)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
+# ==================== TELEGRAM WEBHOOK ====================
 @router.post("/telegram/webhook")
 async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
     try:
@@ -74,43 +75,6 @@ async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
         return {"status": "ignored_update"}
     
     except Exception as e:
-        logger.error(f"Webhook error: {str(e)}", exc_info=True)
-        return {"status": "error", "message": str(e)}
-@router.post("/telegram/webhook")
-async def telegram_webhook(request: Request, db: Session = Depends(get_db)):
-    # ALWAYS log everything
-    print("="*50)
-    print("WEBHOOK RECEIVED!")
-    print("="*50)
-    
-    try:
-        # Log raw request for debugging
-        body = await request.body()
-        print(f"RAW BODY: {body.decode('utf-8')}")
-        logger.info(f"Raw webhook received: {body.decode('utf-8')}")
-        
-        data = await request.json()
-        print(f"PARSED JSON: {json.dumps(data, indent=2)}")
-        logger.info(f"Parsed webhook: {json.dumps(data, indent=2)}")
-        
-        # Handle callback queries (button presses)
-        if "callback_query" in data:
-            print("✅ Processing callback query")
-            logger.info("Processing callback query")
-            return await handle_callback_query(data["callback_query"], db)
-        
-        # Handle text messages
-        elif "message" in data:
-            print("✅ Processing text message")
-            logger.info("Processing text message")
-            return await handle_text_message(data["message"], db)
-        
-        print("❌ Ignoring unknown update type")
-        logger.info("Ignoring unknown update type")
-        return {"status": "ignored_update"}
-    
-    except Exception as e:
-        print(f"❌ Webhook error: {e}")
         logger.error(f"Webhook error: {str(e)}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
@@ -344,8 +308,28 @@ async def handle_callback_query(callback, db: Session):
             return {"status": "success"}
 
         elif callback_data == "avail_another":
-            logger.info("📅 Checking another date")
+            logger.info(f"📅 Checking another date (message_id: {message_id})")
+            
+            # Answer the callback to remove loading state
+            try:
+                await send_telegram_message(chat_id, "🔄 Loading date picker...")
+            except:
+                pass
+                
+            # Call the availability command
             await handle_availability_command(chat_id, "", db)
+            
+            # Delete the original message to prevent double-clicks
+            try:
+                delete_url = f"{TELEGRAM_API_URL}/deleteMessage"
+                requests.post(delete_url, json={
+                    "chat_id": chat_id,
+                    "message_id": message_id
+                }, timeout=5)
+                logger.info(f"✅ Deleted original message {message_id}")
+            except Exception as e:
+                logger.error(f"Failed to delete message: {e}")
+                
             return {"status": "success"}
 
         elif callback_data == "avail_cancel":
@@ -353,14 +337,13 @@ async def handle_callback_query(callback, db: Session):
             await send_telegram_message(chat_id, "❌ Availability check cancelled.")
             return {"status": "success"}
         
-                # Handle cancellation confirmation
+        # Handle cancellation confirmation
         if callback_data.startswith("cancel_confirm_"):
             booking_id = int(callback_data.replace("cancel_confirm_", ""))
             booking = db.query(models.ConfirmedBooking).filter(models.ConfirmedBooking.id == booking_id).first()
             
             if booking:
-                # Delete or mark as cancelled
-                # You may need to add a "Cancelled" status to your model
+                # Mark as cancelled
                 booking.status = "Cancelled"
                 db.commit()
                 
@@ -648,6 +631,7 @@ async def handle_callback_query(callback, db: Session):
         logger.error(f"Error in handle_callback_query: {str(e)}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
+# ==================== NATURAL LANGUAGE HANDLER ====================
 async def handle_natural_language(chat_id: int, text: str, db: Session):
     """Handle natural language queries"""
     from services.nlp_processor import nlp
@@ -827,322 +811,7 @@ async def handle_natural_language(chat_id: int, text: str, db: Session):
             "• Policies: 'Check-in time?' or 'Pet policy?'\n\n"
             "Or type /help to see all commands.")
 
-async def handle_callback_query(callback, db: Session):
-    """Handle inline keyboard button presses"""
-    try:
-        callback_data = callback["data"]
-        chat_id = callback["message"]["chat"]["id"]
-        message_id = callback["message"]["message_id"]
-        callback_id = callback["id"]
-        
-        logger.info(f"Processing callback - Action: {callback_data}, Chat: {chat_id}")
-        
-        # Always answer callback query first (removes loading state on button)
-        try:
-            answer_url = f"{TELEGRAM_API_URL}/answerCallbackQuery"
-            requests.post(answer_url, json={"callback_query_id": callback_id}, timeout=5)
-            logger.info("Callback answered successfully")
-        except Exception as e:
-            logger.error(f"Failed to answer callback: {e}")
-        
-        # Handle availability date selection
-        if callback_data.startswith("avail_date_"):
-            date_str = callback_data.replace("avail_date_", "")
-            logger.info(f"📅 Date selected: {date_str}")
-            try:
-                selected_date = date.fromisoformat(date_str)
-                logger.info(f"✅ Parsed date successfully: {selected_date}")
-                await show_availability(chat_id, selected_date, db)
-            except ValueError as e:
-                logger.error(f"❌ Date parsing error: {e}")
-                await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
-            except Exception as e:
-                logger.error(f"❌ Unexpected error in date selection: {e}", exc_info=True)
-                await send_telegram_message(chat_id, "❌ Error checking availability.")
-            return {"status": "success"}
-
-        elif callback_data == "avail_another":
-            logger.info("📅 Checking another date")
-            await handle_availability_command(chat_id, "", db)
-            return {"status": "success"}
-
-        elif callback_data == "avail_cancel":
-            logger.info("❌ Availability check cancelled")
-            await send_telegram_message(chat_id, "❌ Availability check cancelled.")
-            return {"status": "success"}
-        
-        # Handle special actions without booking IDs (stats, today, pending, help)
-        if callback_data in ["stats", "today", "pending", "help"]:
-            if callback_data == "stats":
-                logger.info("Processing stats command from callback")
-                
-                # Gather comprehensive statistics
-                total = db.query(models.BookingRequest).count()
-                pending = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Pending").count()
-                confirmed = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Confirmed").count()
-                waitlist = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Waitlist").count()
-                rejected = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Rejected").count()
-                draft_ready = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Draft_Ready").count()
-                email_sent = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Email_Sent").count()
-                
-                today = date.today()
-                today_arrivals = db.query(models.BookingRequest).filter(
-                    models.BookingRequest.arrival_date == today
-                ).count()
-                today_departures = db.query(models.BookingRequest).filter(
-                    models.BookingRequest.departure_date == today
-                ).count()
-                
-                # Calculate response rate
-                responded = confirmed + rejected + waitlist
-                response_rate = f"{(responded/total*100):.1f}%" if total > 0 else "0%"
-                
-                stats = {
-                    'total': total,
-                    'pending': pending,
-                    'confirmed': confirmed,
-                    'waitlist': waitlist,
-                    'rejected': rejected,
-                    'draft_ready': draft_ready,
-                    'email_sent': email_sent,
-                    'today_arrivals': today_arrivals,
-                    'today_departures': today_departures,
-                    'response_rate': response_rate
-                }
-                
-                # Use the new professional stats dashboard
-                await send_stats_dashboard(chat_id, stats)
-                
-            elif callback_data == "today":
-                logger.info("Processing today command from callback")
-                
-                today = date.today()
-                
-                arrivals = db.query(models.BookingRequest).filter(
-                    models.BookingRequest.arrival_date == today
-                ).all()
-                
-                departures = db.query(models.BookingRequest).filter(
-                    models.BookingRequest.departure_date == today
-                ).all()
-                
-                # Use the new professional today summary
-                await send_today_summary(chat_id, arrivals, departures)
-                
-            elif callback_data == "pending":
-                logger.info("Processing pending command from callback")
-                await handle_pending_command(chat_id, db)
-                
-            elif callback_data == "help":
-                logger.info("Processing help command from callback")
-                await handle_help_command(chat_id)
-                
-            return {"status": "success"}
-        
-        # Parse callback data with booking ID (format: action_bookingId)
-        parts = callback_data.split("_")
-        if len(parts) != 2:
-            logger.error(f"Invalid callback data format: {callback_data}")
-            await send_telegram_message(chat_id, "❌ Invalid callback data format.")
-            return {"status": "error", "message": "Invalid callback data"}
-        
-        action, booking_id_str = parts
-        
-        try:
-            booking_id = int(booking_id_str)
-        except ValueError:
-            logger.error(f"Invalid booking ID: {booking_id_str}")
-            await send_telegram_message(chat_id, "❌ Invalid booking ID.")
-            return {"status": "error", "message": "Invalid booking ID"}
-        
-        # Handle modification actions first (they use modification IDs, not booking IDs)
-        if action in ["mod_approve", "mod_reject", "mod_details"]:
-            return await handle_modification_actions(action, booking_id, chat_id, message_id, db)
-        
-        # Get booking from database for regular booking actions
-        booking = db.query(models.BookingRequest).filter(
-            models.BookingRequest.id == booking_id
-        ).first()
-        
-        if not booking:
-            logger.error(f"Booking {booking_id} not found")
-            await send_telegram_message(chat_id, f"❌ Booking #{booking_id} not found.")
-            return {"status": "error", "message": "Booking not found"}
-        
-        logger.info(f"Found booking #{booking_id} with status: {booking.status}")
-        
-        # Handle different actions
-        if action in ["confirm", "reject", "waitlist"]:
-            # Update booking status
-            new_status = action.capitalize()
-            booking.status = new_status
-            db.commit()
-            logger.info(f"Updated booking #{booking_id} status to: {new_status}")
-            
-            # Generate draft reply
-            draft = generate_reply_draft(booking, new_status)
-            booking.draft_reply = draft
-            db.commit()
-            logger.info(f"Generated draft for booking #{booking_id}")
-            
-            # Send draft for approval
-            await send_draft_for_approval(booking, new_status, draft)
-            
-            # Update original message to show it was processed
-            await edit_message_text(
-                chat_id, 
-                message_id,
-                f"✅ Booking #{booking.id} marked as {new_status}\nDraft generated. Please review above."
-            )
-        
-        elif action == "edit":
-            logger.info(f"Processing edit action for booking {booking_id}")
-            
-            # First, check if another booking is already in editing mode
-            existing_edit = db.query(models.BookingRequest).filter(
-                models.BookingRequest.status == "Editing",
-                models.BookingRequest.id != booking_id
-            ).first()
-            
-            if existing_edit:
-                # Warn about conflicting edit
-                warning_message = (
-                    f"⚠️ *Cannot Enter Edit Mode*\n\n"
-                    f"Booking #{existing_edit.id} is already being edited.\n\n"
-                    f"Please finish editing that booking first or wait for it to timeout."
-                )
-                await send_telegram_message(chat_id, warning_message)
-                return {"status": "error", "message": "Another booking is in editing mode"}
-            
-            # Put this booking in editing mode
-            booking.status = "Editing"
-            db.commit()
-            
-            # Send clear instructions with mode indicator
-            current_draft = booking.draft_reply or "No draft yet."
-            
-            # Create a distinctive editing mode message
-            instruction_message = (
-                f"✏️ *EDITING MODE ACTIVATED*\n"
-                f"{'━' * 25}\n\n"
-                f"*Booking #{booking.id} - {booking.guest_name}*\n\n"
-                f"*Current Draft:*\n"
-                f"```\n{current_draft}\n```\n\n"
-                f"*Instructions:*\n"
-                f"1️⃣ Reply directly to THIS message\n"
-                f"2️⃣ Send your revised draft\n"
-                f"3️⃣ I'll update and confirm\n\n"
-                f"*Commands in editing mode:*\n"
-                f"• /cancel - Exit edit mode\n"
-                f"• /help - Show help\n\n"
-                f"{'━' * 25}\n"
-                f"⏱️ *Edit mode will timeout in 30 minutes*"
-            )
-            
-            # Send with a distinctive reply markup to indicate it's the edit session
-            edit_keyboard = {
-                "inline_keyboard": [
-                    [
-                        {"text": "❌ CANCEL EDIT", "callback_data": f"cancel_{booking.id}"}
-                    ]
-                ]
-            }
-            
-            await send_telegram_message(chat_id, instruction_message, reply_markup=edit_keyboard)
-            
-            # Update original message to show it's in editing mode
-            await edit_message_text(
-                chat_id,
-                message_id,
-                f"✏️ **Booking #{booking.id} is now in EDIT MODE**\n\nPlease reply to the edit instruction message above with your revised draft."
-            )
-        
-        elif action == "send":
-            logger.info(f"Processing send action for booking {booking_id}")
-            
-            # TODO: Implement actual email sending via Gmail API
-            booking.status = "Email_Sent"
-            db.commit()
-            
-            # Move to confirmed bookings - MAP draft_reply TO ai_draft_email
-            confirmed_booking = models.ConfirmedBooking(
-                booking_request_id=booking.id,
-                hotel_id=booking.hotel_id,
-                guest_name=booking.guest_name,
-                email=booking.email,
-                arrival_date=booking.arrival_date,
-                departure_date=booking.departure_date,
-                room_type=booking.room_type,
-                number_of_rooms=booking.number_of_rooms,
-                number_of_guests=booking.number_of_guests,
-                special_requests=booking.special_requests,
-                ai_draft_email=booking.draft_reply
-            )
-            db.add(confirmed_booking)
-            db.commit()
-            logger.info(f"Booking #{booking_id} moved to confirmed bookings with ai_draft_email={booking.draft_reply}")
-            
-            await send_telegram_message(
-                chat_id,
-                f"✅ Email sent and booking #{booking.id} confirmed!"
-            )
-            
-            # Update original message
-            await edit_message_text(
-                chat_id,
-                message_id,
-                f"✅ **Booking #{booking.id} - Email Sent**\n\nThis booking has been confirmed and the email has been sent."
-            )
-        
-        elif action == "details":
-            logger.info(f"Processing details action for booking {booking_id}")
-            
-            details_message = (
-                f"📋 **Booking #{booking.id} Details**\n\n"
-                f"**Guest:** {booking.guest_name}\n"
-                f"**Email:** {booking.email}\n"
-                f"**Room:** {booking.room_type}\n"
-                f"**Arrival:** {booking.arrival_date}\n"
-                f"**Departure:** {booking.departure_date}\n"
-                f"**Rooms:** {booking.number_of_rooms}\n"
-                f"**Guests:** {booking.number_of_guests}\n"
-                f"**Status:** {booking.status}\n"
-                f"**Created:** {booking.created_at}\n\n"
-                f"**Special Requests:**\n{booking.special_requests or 'None'}\n\n"
-                f"**Current Draft:**\n```\n{booking.draft_reply or 'No draft yet'}\n```"
-            )
-            
-            await send_telegram_message(chat_id, details_message)
-        
-        elif action == "cancel":
-            logger.info(f"Processing cancel action for booking {booking_id}")
-            
-            # Reset status if it was in editing
-            if booking.status == "Editing":
-                booking.status = "Pending"
-                db.commit()
-            
-            await send_telegram_message(
-                chat_id,
-                f"❌ Action cancelled for booking #{booking.id}"
-            )
-            
-            await edit_message_text(
-                chat_id,
-                message_id,
-                f"❌ Action cancelled for booking #{booking.id}"
-            )
-        
-        else:
-            logger.warning(f"Unknown action: {action}")
-            await send_telegram_message(chat_id, f"❌ Unknown action: {action}")
-        
-        return {"status": "success"}
-        
-    except Exception as e:
-        logger.error(f"Error in handle_callback_query: {str(e)}", exc_info=True)
-        return {"status": "error", "message": str(e)}
-
+# ==================== TEXT MESSAGE HANDLER ====================
 async def handle_text_message(message, db: Session):
     """Handle text messages (for editing drafts and answering questions)"""
     try:
@@ -1248,7 +917,6 @@ async def handle_text_message(message, db: Session):
             elif text == '/pending':
                 await handle_pending_command(chat_id, db)
                 return {"status": "command_processed"}
-            # NEW COMMANDS - Add these
             elif text.startswith('/availability'):
                 await handle_availability_command(chat_id, text[13:], db)
                 return {"status": "command_processed"}
@@ -1270,7 +938,7 @@ async def handle_text_message(message, db: Session):
             # We're in editing mode - process as draft update
             booking = editing_booking
             
-            # Check if this is a reply to the edit instruction (optional but recommended)
+            # Check if this is a reply to the edit instruction
             reply_to_message = message.get("reply_to_message")
             is_reply_to_edit = False
             
@@ -1292,7 +960,6 @@ async def handle_text_message(message, db: Session):
             
             # Update the draft
             logger.info(f"Processing edit for booking #{booking.id}")
-            old_draft = booking.draft_reply
             booking.draft_reply = text
             booking.status = "Draft_Ready"
             db.commit()
@@ -1338,10 +1005,10 @@ async def handle_text_message(message, db: Session):
                 }, timeout=5)
             except:
                 pass
-        
-            else:
+            
+        else:
             # Not in editing mode - try natural language processing first
-               logger.info("No booking in editing mode, trying natural language")
+            logger.info("No booking in editing mode, trying natural language")
             
             # Check if it's a natural language query
             from services.nlp_processor import nlp
@@ -1361,6 +1028,7 @@ async def handle_text_message(message, db: Session):
         logger.error(f"Error in handle_text_message: {str(e)}", exc_info=True)
         return {"status": "error", "message": str(e)}
 
+# ==================== AVAILABILITY COMMANDS ====================
 async def handle_availability_command(chat_id: int, args: str, db: Session):
     """Usage: /availability [YYYY-MM-DD] [room_type]"""
     logger.info(f"=== AVAILABILITY COMMAND STARTED ===")
@@ -1385,7 +1053,7 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
         for i in range(7):
             date = today + timedelta(days=i)
             date_str = date.strftime("%Y-%m-%d")
-            display = date.strftime("%d %b")  # Shows "05 Mar"
+            display = date.strftime("%d %b")
             
             row.append({
                 "text": display,
@@ -1421,12 +1089,10 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
     room_type = parts[1] if len(parts) > 1 else None
     logger.info(f"Room type filter: {room_type}")
     
-    # Get hotel_id from context (using 1 as default for now)
     hotel_id = 1
     logger.info(f"Using hotel_id: {hotel_id}")
     
     try:
-        # Import here to avoid circular imports
         from services.availability import check_availability
         logger.info("Successfully imported check_availability")
         
@@ -1447,13 +1113,8 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
         # Check availability
         logger.info(f"Calling check_availability with date={check_date}, room_type={room_type}")
         avail = check_availability(db, hotel_id, check_date, room_type)
-        logger.info(f"Availability result type: {type(avail)}")
         logger.info(f"Availability result: {avail}")
         
-    except ImportError as e:
-        logger.error(f"Import error: {e}", exc_info=True)
-        await send_telegram_message(chat_id, f"❌ System error: availability module not found")
-        return
     except Exception as e:
         logger.error(f"Availability check error: {str(e)}", exc_info=True)
         await send_telegram_message(chat_id, f"❌ Error checking availability: {str(e)}")
@@ -1492,10 +1153,7 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
             ]
         }
     
-        logger.info(f"Sending response message of length: {len(msg)}")
-    logger.info(f"Response preview: {msg[:100]}...")
-    logger.info(f"Type of send_telegram_message: {type(send_telegram_message)}")
-    logger.info(f"send_telegram_message value: {send_telegram_message}")
+    logger.info(f"Sending response message of length: {len(msg)}")
     
     if room_type:
         try:
@@ -1512,41 +1170,31 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
     
     logger.info("=== AVAILABILITY COMMAND COMPLETED ===")
 
+
 async def show_availability(chat_id: int, check_date: date, db: Session):
     """Helper function to show availability for a specific date"""
     logger.info(f"📊 show_availability called for date: {check_date}")
-    
-    # DEBUG: Check what send_telegram_message is
-    logger.info(f"Type of send_telegram_message: {type(send_telegram_message)}")
-    logger.info(f"send_telegram_message value: {send_telegram_message}")
     
     hotel_id = 1
     
     try:
         from services.availability import check_availability
-        logger.info("✅ Imported check_availability")
         
         # Check if room types exist
         room_types_count = db.query(models.RoomType).filter(models.RoomType.hotel_id == hotel_id).count()
-        logger.info(f"🏨 Room types found: {room_types_count}")
         
         if room_types_count == 0:
-            logger.warning("❌ No room types found")
             await send_telegram_message(chat_id, "❌ No room types found. Please create room types first.")
             return
         
-        logger.info(f"🔍 Calling check_availability with date={check_date}")
         avail = check_availability(db, hotel_id, check_date, None)
-        logger.info(f"📊 Availability result: {avail}")
         
         if not avail:
             msg = f"📅 No availability data found for {check_date}."
-            logger.info("❌ No availability data")
         else:
             msg = f"📅 *Availability Summary for {check_date}*\n\n"
             for rt, data in avail.items():
                 msg += f"🏨 *{rt}*: {data['available']}/{data['total']} available ({data['guests']} guests)\n"
-            logger.info(f"✅ Generated message with {len(avail)} room types")
         
         # Add button to check another date
         keyboard = {
@@ -1555,39 +1203,16 @@ async def show_availability(chat_id: int, check_date: date, db: Session):
             ]
         }
         
-        logger.info(f"About to send message with keyboard. Msg length: {len(msg)}")
-        
-        # Try to send the message
-        try:
-            # Import the function directly to avoid any namespace issues
-            from services.telegram import send_telegram_message as send_msg
-            result = await send_msg(chat_id, msg, reply_markup=keyboard)
-            logger.info(f"✅ Message sent successfully: {result}")
-        except Exception as e:
-            logger.error(f"❌ Error sending message: {e}", exc_info=True)
-            # Try one more time with the original function name
-            try:
-                result = await send_telegram_message(chat_id, msg, reply_markup=keyboard)
-                logger.info(f"✅ Second attempt succeeded: {result}")
-            except Exception as e2:
-                logger.error(f"❌ Second attempt also failed: {e2}", exc_info=True)
-                # Send a simple text message as fallback
-                try:
-                    fallback_msg = f"Availability for {check_date}:\n"
-                    for rt, data in avail.items():
-                        fallback_msg += f"{rt}: {data['available']}/{data['total']}\n"
-                    await send_telegram_message(chat_id, fallback_msg)
-                    logger.info("✅ Fallback message sent")
-                except:
-                    logger.error("❌ All sending attempts failed")
+        # Send just ONE message
+        await send_telegram_message(chat_id, msg, reply_markup=keyboard)
+        logger.info("✅ Single availability message sent")
         
     except Exception as e:
         logger.error(f"❌ Availability error: {e}", exc_info=True)
-        # Don't send error message to user - just log it
+        # Don't send any error message to the user
         pass
-        # Only send error if we haven't already sent a response
-        if 'msg' not in locals():
-            await send_telegram_message(chat_id, "❌ Sorry, I couldn't check availability right now. Please try again later.")
+
+# ==================== BOOKINGS COMMANDS ====================
 async def handle_bookings_command(chat_id: int, args: str, db: Session):
     """Usage: /bookings YYYY-MM-DD YYYY-MM-DD"""
     parts = args.strip().split()
@@ -1649,13 +1274,14 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
             daily_bookings = [b for b in bookings if b['arrival'] <= date_str < b['departure']]
             if daily_bookings:
                 detail_msg += f"*{date_str}*:\n"
-                for b in daily_bookings[:3]:  # Limit to 3 per day to avoid long messages
+                for b in daily_bookings[:3]:
                     detail_msg += f"  • #{b['id']}: {b['guest']} - {b['room_type']} ({b['guests']} guests)\n"
                 if len(daily_bookings) > 3:
                     detail_msg += f"  ... and {len(daily_bookings)-3} more\n"
         
         await send_telegram_message(chat_id, detail_msg)
 
+# ==================== MODIFY COMMAND ====================
 async def handle_modify_command(chat_id: int, args: str, db: Session):
     """Usage: /modify <confirmed_booking_id>"""
     args = args.strip()
@@ -1726,6 +1352,7 @@ async def handle_modify_command(chat_id: int, args: str, db: Session):
         f"Please review it in the message above."
     )
 
+# ==================== MANAGER Q&A ====================
 async def handle_manager_question(chat_id: int, question: str, db: Session):
     """Handle manager questions with predefined answers"""
     
@@ -1822,6 +1449,7 @@ async def handle_manager_question(chat_id: int, question: str, db: Session):
     
     await send_telegram_message(chat_id, response, reply_markup=keyboard)
 
+# ==================== STATISTICS COMMANDS ====================
 async def handle_stats_command(chat_id: int, db: Session):
     """Handle /stats command"""
     total = db.query(models.BookingRequest).count()
@@ -1887,7 +1515,7 @@ async def handle_pending_command(chat_id: int, db: Session):
     
     if pending:
         message = "⏳ **Pending Bookings**\n\n"
-        for b in pending[:10]:  # Show first 10
+        for b in pending[:10]:
             message += f"• #{b.id}: {b.guest_name} - {b.room_type} ({b.arrival_date})\n"
         if len(pending) > 10:
             message += f"\n... and {len(pending) - 10} more"
@@ -1920,6 +1548,7 @@ async def handle_help_command(chat_id: int):
     
     await send_telegram_message(chat_id, message)
 
+# ==================== EDIT MESSAGE HELPER ====================
 async def edit_message_text(chat_id: int, message_id: int, text: str):
     """Helper to edit a Telegram message"""
     url = f"{TELEGRAM_API_URL}/editMessageText"
