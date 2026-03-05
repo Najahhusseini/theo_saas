@@ -630,6 +630,55 @@ async def handle_callback_query(callback, db: Session):
     except Exception as e:
         logger.error(f"Error in handle_callback_query: {str(e)}", exc_info=True)
         return {"status": "error", "message": str(e)}
+        # Handle bookings date range selection - start date
+        if callback_data.startswith("bookings_start_"):
+            date_str = callback_data.replace("bookings_start_", "")
+            logger.info(f"📅 Bookings start date selected: {date_str}")
+            try:
+                selected_date = date.fromisoformat(date_str)
+                # Store start date in a temporary dict (use chat_id as key)
+                if not hasattr(handle_callback_query, "bookings_start_dates"):
+                    handle_callback_query.bookings_start_dates = {}
+                handle_callback_query.bookings_start_dates[chat_id] = selected_date
+                
+                # Now ask for end date
+                await ask_for_end_date(chat_id, selected_date, db)
+            except ValueError as e:
+                logger.error(f"❌ Date parsing error: {e}")
+                await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
+            return {"status": "success"}
+
+        # Handle bookings date range selection - end date
+        elif callback_data.startswith("bookings_end_"):
+            date_str = callback_data.replace("bookings_end_", "")
+            logger.info(f"📅 Bookings end date selected: {date_str}")
+            try:
+                end_date = date.fromisoformat(date_str)
+                # Get start date from storage
+                if not hasattr(handle_callback_query, "bookings_start_dates") or chat_id not in handle_callback_query.bookings_start_dates:
+                    await send_telegram_message(chat_id, "❌ Please select a start date first.")
+                    return {"status": "error"}
+                
+                start_date = handle_callback_query.bookings_start_dates.pop(chat_id)
+                
+                if start_date > end_date:
+                    await send_telegram_message(chat_id, "❌ End date must be after start date. Please try again.")
+                    await handle_bookings_command(chat_id, "", db)
+                    return {"status": "error"}
+                
+                # Show bookings for the selected range
+                await handle_bookings_command(chat_id, f"{start_date} {end_date}", db)
+            except ValueError as e:
+                logger.error(f"❌ Date parsing error: {e}")
+                await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
+            return {"status": "success"}
+
+        elif callback_data == "bookings_cancel":
+            logger.info("❌ Bookings check cancelled")
+            if hasattr(handle_callback_query, "bookings_start_dates") and chat_id in handle_callback_query.bookings_start_dates:
+                del handle_callback_query.bookings_start_dates[chat_id]
+            await send_telegram_message(chat_id, "❌ Bookings check cancelled.")
+            return {"status": "success"}
 
 # ==================== NATURAL LANGUAGE HANDLER ====================
 async def handle_natural_language(chat_id: int, text: str, db: Session):
@@ -1170,6 +1219,43 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
     
     logger.info("=== AVAILABILITY COMMAND COMPLETED ===")
 
+async def ask_for_end_date(chat_id: int, start_date: date, db: Session):
+    """Show date picker for end date selection"""
+    logger.info(f"📅 Asking for end date after start date: {start_date}")
+    
+    # Create buttons for next 14 days (starting from start_date)
+    keyboard = {
+        "inline_keyboard": []
+    }
+    
+    # Add rows of 3 dates each
+    row = []
+    for i in range(14):  # Show 14 days for end date selection
+        date = start_date + timedelta(days=i)
+        date_str = date.strftime("%Y-%m-%d")
+        display = date.strftime("%d %b")
+        
+        row.append({
+            "text": display,
+            "callback_data": f"bookings_end_{date_str}"
+        })
+        
+        # Create new row every 3 buttons
+        if len(row) == 3 or i == 13:
+            keyboard["inline_keyboard"].append(row)
+            row = []
+    
+    # Add cancel button
+    keyboard["inline_keyboard"].append([
+        {"text": "❌ Cancel", "callback_data": "bookings_cancel"}
+    ])
+    
+    await send_telegram_message(
+        chat_id,
+        f"📅 *Select End Date*\n\nStart date: {start_date.strftime('%d %b %Y')}\n\nPlease select an end date:",
+        reply_markup=keyboard
+    )
+
 
 async def show_availability(chat_id: int, check_date: date, db: Session):
     """Helper function to show availability for a specific date"""
@@ -1214,16 +1300,49 @@ async def show_availability(chat_id: int, check_date: date, db: Session):
 
 # ==================== BOOKINGS COMMANDS ====================
 async def handle_bookings_command(chat_id: int, args: str, db: Session):
-    """Usage: /bookings YYYY-MM-DD YYYY-MM-DD"""
+    """Usage: /bookings [YYYY-MM-DD YYYY-MM-DD] - if no dates provided, shows interactive date picker"""
     parts = args.strip().split()
+    
+    # If no dates provided, show interactive date range selector
     if len(parts) < 2:
-        await send_telegram_message(chat_id,
-            "📋 *Bookings Command*\n\n"
-            "Usage: `/bookings YYYY-MM-DD YYYY-MM-DD`\n"
-            "Example: `/bookings 2026-03-01 2026-03-05`"
+        logger.info("No dates provided, showing date range picker")
+        
+        # Create buttons for next 14 days (starting from today)
+        today = datetime.now().date()
+        keyboard = {
+            "inline_keyboard": []
+        }
+        
+        # Add rows of 3 dates each
+        row = []
+        for i in range(14):
+            date = today + timedelta(days=i)
+            date_str = date.strftime("%Y-%m-%d")
+            display = date.strftime("%d %b")
+            
+            row.append({
+                "text": display,
+                "callback_data": f"bookings_start_{date_str}"
+            })
+            
+            # Create new row every 3 buttons
+            if len(row) == 3 or i == 13:
+                keyboard["inline_keyboard"].append(row)
+                row = []
+        
+        # Add cancel button
+        keyboard["inline_keyboard"].append([
+            {"text": "❌ Cancel", "callback_data": "bookings_cancel"}
+        ])
+        
+        await send_telegram_message(
+            chat_id,
+            "📅 *Select Start Date*\n\nChoose the first date of your booking range:",
+            reply_markup=keyboard
         )
         return
     
+    # If dates provided, proceed with the existing logic
     try:
         start = date.fromisoformat(parts[0])
         end = date.fromisoformat(parts[1])
@@ -1274,7 +1393,7 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
             daily_bookings = [b for b in bookings if b['arrival'] <= date_str < b['departure']]
             if daily_bookings:
                 detail_msg += f"*{date_str}*:\n"
-                for b in daily_bookings[:3]:
+                for b in daily_bookings[:3]:  # Limit to 3 per day to avoid long messages
                     detail_msg += f"  • #{b['id']}: {b['guest']} - {b['room_type']} ({b['guests']} guests)\n"
                 if len(daily_bookings) > 3:
                     detail_msg += f"  ... and {len(daily_bookings)-3} more\n"
@@ -1532,11 +1651,17 @@ async def handle_help_command(chat_id: int):
         "/stats - View booking statistics\n"
         "/today - See today's arrivals/departures\n"
         "/pending - List pending bookings\n"
-        "/modify <id> - Start modification for a confirmed booking\n\n"
+        "/modify <id> - Start modification for a confirmed booking\n"
+        "/status <id> - Check booking status\n\n"
         "**Availability & Reports:**\n"
-        "/availability [date] - Check room availability (interactive)\n"
-        "/bookings YYYY-MM-DD YYYY-MM-DD - List bookings in date range\n\n"
+        "/availability - Check room availability (interactive date picker)\n"
+        "/bookings - List bookings in a date range (interactive date picker)\n"
+        "/occupancy [date] - Show occupancy percentage\n"
+        "/roomtypes - List all room types\n"
+        "/arrivals - Today's check-ins\n"
+        "/departures - Today's check-outs\n\n"
         "**General:**\n"
+        "/menu - Show main menu\n"
         "/help - Show this message\n\n"
         "**Sample Questions:**\n"
         "• \"What's the check-in time?\"\n"
