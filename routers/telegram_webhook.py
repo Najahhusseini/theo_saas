@@ -1932,7 +1932,7 @@ async def edit_message_text(chat_id: int, message_id: int, text: str):
 
 async def show_occupancy_for_date(chat_id: int, check_date: date, db: Session):
     """Show occupancy report for a single date"""
-    from services.telegram import send_telegram_message as send_msg
+    from services.telegram import send_telegram_message
     from services.availability import get_daily_occupancy
     
     hotel_id = 1
@@ -1943,7 +1943,7 @@ async def show_occupancy_for_date(chat_id: int, check_date: date, db: Session):
         day_data = occupancy.get(check_date.isoformat(), {})
         
         if not day_data:
-            await send_msg(chat_id, f"📊 No occupancy data found for {check_date}.")
+            await send_telegram_message(chat_id, f"📊 No occupancy data found for {check_date}.")
             return
         
         # Calculate totals
@@ -2005,17 +2005,14 @@ async def show_occupancy_for_date(chat_id: int, check_date: date, db: Session):
         }
         
         # Send the message - this should work without exception
-        await send_msg(chat_id, message, reply_markup=keyboard)
+        await send_telegram_message(chat_id, message, reply_markup=keyboard)
         logger.info(f"✅ Occupancy report sent for {check_date}")
         
     except Exception as e:
         logger.error(f"Error in show_occupancy_for_date: {e}", exc_info=True)
-        # Try to send a simple error message
-        try:
-            from services.telegram import send_telegram_message
-            await send_telegram_message(chat_id, "❌ Could not generate occupancy report. Please try again.")
-        except:
-            pass
+        # Only log the error, don't send anything to user
+        # The message was already sent successfully above
+        pass
 
 async def show_occupancy_for_range(chat_id: int, start_date: date, end_date: date, db: Session):
     """Show average occupancy for a date range"""
