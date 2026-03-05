@@ -438,9 +438,9 @@ async def handle_callback_query(callback, db: Session):
             await edit_message_text(chat_id, message_id, f"❌ Cancellation aborted for Booking #{booking_id}")
             return {"status": "success"}
         
-        # ===== SPECIAL ACTIONS (STATS, TODAY, PENDING, HELP) =====
+        # ===== SPECIAL ACTIONS (STATS, TODAY, PENDING, HELP, STATUS) =====
         # Handle special actions without booking IDs
-        if callback_data in ["stats", "today", "pending", "help"]:
+        if callback_data in ["stats", "today", "pending", "help", "status"]:
             if callback_data == "stats":
                 logger.info("Processing stats command from callback")
                 
@@ -480,6 +480,10 @@ async def handle_callback_query(callback, db: Session):
                 
                 # Use the new professional stats dashboard
                 await send_stats_dashboard(chat_id, stats)
+                
+            elif callback_data == "status":
+                logger.info("🔄 Refreshing status dashboard")
+                await handle_status_command(chat_id, db)
                 
             elif callback_data == "today":
                 logger.info("Processing today command from callback")
@@ -989,8 +993,8 @@ async def handle_text_message(message, db: Session):
                 return {"status": "command_blocked"}
             
             # Normal mode commands
-            if text == '/stats':
-                await handle_stats_command(chat_id, db)
+            elif text == '/status':
+                await handle_status_command(chat_id, db)
                 return {"status": "command_processed"}
             elif text == '/today':
                 await handle_today_command(chat_id, db)
@@ -1510,6 +1514,122 @@ async def handle_modify_command(chat_id: int, args: str, db: Session):
         f"✅ Modification request #{modification.id} created for booking #{booking_id}.\n"
         f"Please review it in the message above."
     )
+
+async def handle_status_command(chat_id: int, db: Session):
+    """Show real-time hotel status dashboard"""
+    from services.telegram import send_telegram_message as send_msg
+    from datetime import datetime, date
+    from sqlalchemy import func
+    
+    logger.info(f"📊 Processing status command for chat {chat_id}")
+    
+    hotel_id = 1
+    today = date.today()
+    now = datetime.now()
+    
+    # Get total rooms count
+    room_types = db.query(models.RoomType).filter(
+        models.RoomType.hotel_id == hotel_id
+    ).all()
+    total_rooms = sum(rt.total_rooms for rt in room_types)
+    
+    # Get today's occupancy
+    today_bookings = db.query(models.ConfirmedBooking).filter(
+        models.ConfirmedBooking.hotel_id == hotel_id,
+        models.ConfirmedBooking.arrival_date <= today,
+        models.ConfirmedBooking.departure_date > today
+    ).all()
+    
+    occupied_rooms = sum(b.number_of_rooms for b in today_bookings)
+    available_rooms = total_rooms - occupied_rooms
+    occupancy_rate = round((occupied_rooms / total_rooms * 100) if total_rooms > 0 else 0)
+    
+    # Get today's check-ins/outs
+    check_ins = db.query(models.ConfirmedBooking).filter(
+        models.ConfirmedBooking.hotel_id == hotel_id,
+        models.ConfirmedBooking.arrival_date == today
+    ).count()
+    
+    check_outs = db.query(models.ConfirmedBooking).filter(
+        models.ConfirmedBooking.hotel_id == hotel_id,
+        models.ConfirmedBooking.departure_date == today
+    ).count()
+    
+    # Calculate current in-house guests
+    current_guests = db.query(func.sum(models.ConfirmedBooking.number_of_guests)).filter(
+        models.ConfirmedBooking.hotel_id == hotel_id,
+        models.ConfirmedBooking.arrival_date <= today,
+        models.ConfirmedBooking.departure_date > today
+    ).scalar() or 0
+    
+    # Get pending actions
+    pending_requests = db.query(models.BookingRequest).filter(
+        models.BookingRequest.status == "Pending"
+    ).count()
+    
+    pending_mods = db.query(models.ModificationRequest).filter(
+        models.ModificationRequest.status == "Pending"
+    ).count()
+    
+    drafts_ready = db.query(models.BookingRequest).filter(
+        models.BookingRequest.status == "Draft_Ready"
+    ).count()
+    
+    # Room type breakdown
+    room_breakdown = []
+    for rt in room_types:
+        booked = db.query(models.ConfirmedBooking).filter(
+            models.ConfirmedBooking.hotel_id == hotel_id,
+            models.ConfirmedBooking.room_type == rt.name,
+            models.ConfirmedBooking.arrival_date <= today,
+            models.ConfirmedBooking.departure_date > today
+        ).count()
+        room_breakdown.append(f"• {rt.name}: {booked}/{rt.total_rooms} booked")
+    
+    # Build message
+    message = f"""
+🏨 *HOTEL STATUS DASHBOARD*
+━━━━━━━━━━━━━━━━━━━
+📅 *Today:* {today.strftime('%d %b %Y')}
+🕐 *Time:* {now.strftime('%H:%M')}
+
+📊 *OCCUPANCY*
+• Total Rooms: {total_rooms}
+• Occupied: {occupied_rooms}
+• Available: {available_rooms}
+• Occupancy Rate: {occupancy_rate}%
+
+👥 *GUESTS TODAY*
+• Check-ins: {check_ins}
+• Check-outs: {check_outs}
+• Currently In-house: {current_guests}
+
+⏳ *PENDING ACTIONS*
+• New Requests: {pending_requests}
+• Modifications: {pending_mods}
+• Drafts Ready: {drafts_ready}
+
+🏨 *ROOM TYPE BREAKDOWN*
+{chr(10).join(room_breakdown)}
+━━━━━━━━━━━━━━━━━━━
+💡 *Quick Actions*
+"""
+    
+    # Add quick action buttons
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "📅 Today's Arrivals", "callback_data": "today"},
+                {"text": "⏳ Pending", "callback_data": "pending"}
+            ],
+            [
+                {"text": "📊 Stats", "callback_data": "stats"},
+                {"text": "🔄 Refresh", "callback_data": "status"}
+            ]
+        ]
+    }
+    
+    await send_msg(chat_id, message, reply_markup=keyboard)
 
 # ==================== MANAGER Q&A ====================
 async def handle_manager_question(chat_id: int, question: str, db: Session):
