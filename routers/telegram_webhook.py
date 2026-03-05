@@ -2016,7 +2016,7 @@ async def show_occupancy_for_date(chat_id: int, check_date: date, db: Session):
 
 async def show_occupancy_for_range(chat_id: int, start_date: date, end_date: date, db: Session):
     """Show average occupancy for a date range"""
-    from services.telegram import send_telegram_message as send_msg
+    from services.telegram import send_telegram_message
     from services.availability import get_daily_occupancy
     from datetime import datetime, timedelta
     
@@ -2028,7 +2028,7 @@ async def show_occupancy_for_range(chat_id: int, start_date: date, end_date: dat
         occupancy = get_daily_occupancy(db, hotel_id, start_date, end_date)
         
         if not occupancy:
-            await send_msg(chat_id, f"📊 No occupancy data found for {start_date} to {end_date}.")
+            await send_telegram_message(chat_id, f"📊 No occupancy data found for {start_date} to {end_date}.")
             return
         
         # Calculate averages
@@ -2054,11 +2054,21 @@ async def show_occupancy_for_range(chat_id: int, start_date: date, end_date: dat
         progress_blocks = round(avg_occupancy_pct / 10)
         progress_bar = "█" * progress_blocks + "░" * (10 - progress_blocks)
         
+        # Format period description
+        period_desc = ""
+        days_diff = (end_date - start_date).days
+        if days_diff == 6:
+            period_desc = "This Week"
+        elif days_diff >= 28 and days_diff <= 31:
+            period_desc = "This Month"
+        else:
+            period_desc = f"{start_date.strftime('%d %b')} - {end_date.strftime('%d %b')}"
+        
         # Build message
         message = f"""
 📊 *OCCUPANCY REPORT*
 ━━━━━━━━━━━━━━━━━━━
-📅 *Period:* {start_date.strftime('%d %b %Y')} → {end_date.strftime('%d %b %Y')}
+📅 *Period:* {period_desc}
 📊 *Days:* {daily_counts}
 
 🏨 *Average Occupancy*
@@ -2086,21 +2096,24 @@ async def show_occupancy_for_range(chat_id: int, start_date: date, end_date: dat
         keyboard = {
             "inline_keyboard": [
                 [
-                    {"text": "📅 Daily View", "callback_data": f"occupancy_date_{start_date}"},
+                    {"text": "📅 View Daily", "callback_data": f"occupancy_date_{start_date}"},
                     {"text": "📊 Compare", "callback_data": "occupancy_compare"}
                 ],
                 [
-                    {"text": "◀️ Previous Period", "callback_data": f"occupancy_prev_range_{start_date}_{end_date}"},
-                    {"text": "Next Period ▶️", "callback_data": f"occupancy_next_range_{start_date}_{end_date}"}
+                    {"text": "◀️ Previous Week", "callback_data": f"occupancy_prev_week_{start_date}"},
+                    {"text": "Next Week ▶️", "callback_data": f"occupancy_next_week_{start_date}"}
                 ]
             ]
         }
         
-        await send_msg(chat_id, message, reply_markup=keyboard)
+        # Send the message
+        await send_telegram_message(chat_id, message, reply_markup=keyboard)
+        logger.info(f"✅ Occupancy range report sent for {start_date} to {end_date}")
         
     except Exception as e:
-        logger.error(f"Error generating range occupancy report: {e}")
-        await send_msg(chat_id, "❌ Error generating occupancy report.")
+        logger.error(f"Error in show_occupancy_for_range: {e}", exc_info=True)
+        # Just log the error, don't send anything to user
+        pass
 
 #======================== OCCUPANCY============================
 async def handle_occupancy_command(chat_id: int, args: str, db: Session):
