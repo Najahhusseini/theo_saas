@@ -338,6 +338,79 @@ async def handle_callback_query(callback, db: Session):
             await send_telegram_message(chat_id, "❌ Availability check cancelled.")
             return {"status": "success"}
         
+        # ===== OCCUPANCY HANDLERS =====
+        if callback_data.startswith("occupancy_date_"):
+            date_str = callback_data.replace("occupancy_date_", "")
+            logger.info(f"📊 Occupancy date selected: {date_str}")
+            try:
+                selected_date = date.fromisoformat(date_str)
+                await show_occupancy_for_date(chat_id, selected_date, db)
+            except ValueError as e:
+                logger.error(f"❌ Date parsing error: {e}")
+                await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
+            return {"status": "success"}
+
+        elif callback_data == "occupancy_today":
+            logger.info("📊 Occupancy for today requested")
+            today = datetime.now().date()
+            await show_occupancy_for_date(chat_id, today, db)
+            return {"status": "success"}
+
+        elif callback_data == "occupancy_week":
+            logger.info("📊 Occupancy for this week requested")
+            today = datetime.now().date()
+            start_of_week = today - timedelta(days=today.weekday())
+            end_of_week = start_of_week + timedelta(days=6)
+            await show_occupancy_for_range(chat_id, start_of_week, end_of_week, db)
+            return {"status": "success"}
+
+        elif callback_data == "occupancy_month":
+            logger.info("📊 Occupancy for this month requested")
+            today = datetime.now().date()
+            start_of_month = today.replace(day=1)
+            # Calculate end of month
+            if today.month == 12:
+                end_of_month = today.replace(year=today.year+1, month=1, day=1) - timedelta(days=1)
+            else:
+                end_of_month = today.replace(month=today.month+1, day=1) - timedelta(days=1)
+            await show_occupancy_for_range(chat_id, start_of_month, end_of_month, db)
+            return {"status": "success"}
+
+        elif callback_data == "occupancy_cancel":
+            logger.info("❌ Occupancy check cancelled")
+            await send_telegram_message(chat_id, "❌ Occupancy check cancelled.")
+            return {"status": "success"}
+
+        elif callback_data.startswith("occupancy_prev_"):
+            date_str = callback_data.replace("occupancy_prev_", "")
+            try:
+                current_date = date.fromisoformat(date_str)
+                prev_date = current_date - timedelta(days=1)
+                await show_occupancy_for_date(chat_id, prev_date, db)
+            except:
+                await send_telegram_message(chat_id, "❌ Error loading previous day")
+            return {"status": "success"}
+
+        elif callback_data.startswith("occupancy_next_"):
+            date_str = callback_data.replace("occupancy_next_", "")
+            try:
+                current_date = date.fromisoformat(date_str)
+                next_date = current_date + timedelta(days=1)
+                await show_occupancy_for_date(chat_id, next_date, db)
+            except:
+                await send_telegram_message(chat_id, "❌ Error loading next day")
+            return {"status": "success"}
+
+        elif callback_data == "occupancy_compare":
+            logger.info("📊 Compare occupancy requested")
+            await send_telegram_message(chat_id, 
+                "📊 *Compare Occupancy*\n\n"
+                "This feature is coming soon! You'll be able to compare occupancy across different periods.\n\n"
+                "For now, try:\n"
+                "• /occupancy 2026-03-01 2026-03-07\n"
+                "• /occupancy 2026-03-08 2026-03-14")
+            return {"status": "success"}
+        
         # ===== BOOKINGS HANDLERS =====
         # Handle bookings date range selection - start date
         if callback_data.startswith("bookings_start_"):
@@ -711,89 +784,6 @@ async def handle_callback_query(callback, db: Session):
             await send_telegram_message(chat_id, f"❌ Unknown action: {action}")
         
         return {"status": "success"}
-            # ===== OCCUPANCY HANDLERS =====
-
-
-        # ===== OCCUPANCY HANDLERS =====
-        if callback_data.startswith("occupancy_date_"):
-            date_str = callback_data.replace("occupancy_date_", "")
-            logger.info(f"📊 Occupancy date selected: {date_str}")
-            try:
-                selected_date = date.fromisoformat(date_str)
-                await show_occupancy_for_date(chat_id, selected_date, db)
-            except ValueError as e:
-                logger.error(f"❌ Date parsing error: {e}")
-                await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
-            return {"status": "success"}
-
-        elif callback_data == "occupancy_today":
-            logger.info("📊 Occupancy for today requested")
-            today = datetime.now().date()
-            await show_occupancy_for_date(chat_id, today, db)
-            return {"status": "success"}
-
-        elif callback_data == "occupancy_week":
-            logger.info("📊 Occupancy for this week requested")
-            today = datetime.now().date()
-            start_of_week = today - timedelta(days=today.weekday())
-            end_of_week = start_of_week + timedelta(days=6)
-            await show_occupancy_for_range(chat_id, start_of_week, end_of_week, db)
-            return {"status": "success"}
-
-        elif callback_data == "occupancy_month":
-            logger.info("📊 Occupancy for this month requested")
-            today = datetime.now().date()
-            start_of_month = today.replace(day=1)
-            # Calculate end of month
-            if today.month == 12:
-                end_of_month = today.replace(year=today.year+1, month=1, day=1) - timedelta(days=1)
-            else:
-                end_of_month = today.replace(month=today.month+1, day=1) - timedelta(days=1)
-            await show_occupancy_for_range(chat_id, start_of_month, end_of_month, db)
-            return {"status": "success"}
-
-        elif callback_data == "occupancy_cancel":
-            logger.info("❌ Occupancy check cancelled")
-            await send_telegram_message(chat_id, "❌ Occupancy check cancelled.")
-            return {"status": "success"}
-
-        elif callback_data.startswith("occupancy_prev_"):
-            date_str = callback_data.replace("occupancy_prev_", "")
-            try:
-                current_date = date.fromisoformat(date_str)
-                prev_date = current_date - timedelta(days=1)
-                await show_occupancy_for_date(chat_id, prev_date, db)
-            except:
-                await send_telegram_message(chat_id, "❌ Error loading previous day")
-            return {"status": "success"}
-
-        elif callback_data.startswith("occupancy_next_"):
-            date_str = callback_data.replace("occupancy_next_", "")
-            try:
-                current_date = date.fromisoformat(date_str)
-                next_date = current_date + timedelta(days=1)
-                await show_occupancy_for_date(chat_id, next_date, db)
-            except:
-                await send_telegram_message(chat_id, "❌ Error loading next day")
-            return {"status": "success"}
-
-        # ===== BOOKINGS HANDLERS =====
-        # ... (your existing bookings handlers) ...
-
-        elif callback_data == "occupancy_cancel":
-            logger.info("❌ Occupancy check cancelled")
-            await send_telegram_message(chat_id, "❌ Occupancy check cancelled.")
-            return {"status": "success"}
-
-        elif callback_data == "occupancy_compare":
-            logger.info("📊 Compare occupancy requested")
-            await send_telegram_message(chat_id, 
-                "📊 *Compare Occupancy*\n\n"
-                "This feature is coming soon! You'll be able to compare occupancy across different periods.\n\n"
-                "For now, try:\n"
-                "• /occupancy 2026-03-01 2026-03-07\n"
-                "• /occupancy 2026-03-08 2026-03-14")
-            return {"status": "success"}
         
     except Exception as e:
         logger.error(f"Error in handle_callback_query: {str(e)}", exc_info=True)
