@@ -357,29 +357,43 @@ async def handle_callback_query(callback, db: Session):
                 await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
             return {"status": "success"}
 
-        # Handle bookings date range selection - end date
+                # Handle bookings date range selection - end date
         elif callback_data.startswith("bookings_end_"):
             date_str = callback_data.replace("bookings_end_", "")
             logger.info(f"📅 Bookings end date selected: {date_str}")
             try:
                 end_date = date.fromisoformat(date_str)
+                logger.info(f"✅ Parsed end date: {end_date}")
+                
                 # Get start date from storage
-                if not hasattr(handle_callback_query, "bookings_start_dates") or chat_id not in handle_callback_query.bookings_start_dates:
-                    await send_telegram_message(chat_id, "❌ Please select a start date first.")
+                if not hasattr(handle_callback_query, "bookings_start_dates"):
+                    logger.error("❌ bookings_start_dates dict doesn't exist")
+                    await send_telegram_message(chat_id, "❌ Session expired. Please start over with /bookings")
+                    return {"status": "error"}
+                
+                if chat_id not in handle_callback_query.bookings_start_dates:
+                    logger.error(f"❌ No start date found for chat_id {chat_id}")
+                    await send_telegram_message(chat_id, "❌ No start date selected. Please start over with /bookings")
                     return {"status": "error"}
                 
                 start_date = handle_callback_query.bookings_start_dates.pop(chat_id)
+                logger.info(f"📅 Retrieved start date: {start_date}")
                 
                 if start_date > end_date:
+                    logger.warning(f"❌ End date {end_date} is before start date {start_date}")
                     await send_telegram_message(chat_id, "❌ End date must be after start date. Please try again.")
                     await handle_bookings_command(chat_id, "", db)
                     return {"status": "error"}
                 
+                logger.info(f"✅ Calling handle_bookings_command with {start_date} {end_date}")
                 # Show bookings for the selected range
                 await handle_bookings_command(chat_id, f"{start_date} {end_date}", db)
             except ValueError as e:
                 logger.error(f"❌ Date parsing error: {e}")
                 await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
+            except Exception as e:
+                logger.error(f"❌ Unexpected error: {e}", exc_info=True)
+                await send_telegram_message(chat_id, "❌ Error processing date selection")
             return {"status": "success"}
 
         elif callback_data == "bookings_cancel":
