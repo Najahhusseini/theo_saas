@@ -1328,7 +1328,7 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
         logger.info("No dates provided, showing date range picker")
         
         # Create buttons for next 14 days (starting from today)
-        today = datetime.now().date()
+        current_date = datetime.now().date()
         keyboard = {
             "inline_keyboard": []
         }
@@ -1336,9 +1336,9 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
         # Add rows of 3 dates each
         row = []
         for i in range(14):
-            date = today + timedelta(days=i)
-            date_str = date.strftime("%Y-%m-%d")
-            display = date.strftime("%d %b")
+            pick_date = current_date + timedelta(days=i)
+            date_str = pick_date.strftime("%Y-%m-%d")
+            display = pick_date.strftime("%d %b")
             
             row.append({
                 "text": display,
@@ -1364,8 +1364,9 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
     
     # If dates provided, proceed with the existing logic
     try:
-        start = date.fromisoformat(parts[0])
-        end = date.fromisoformat(parts[1])
+        from datetime import date as date_class
+        start = date_class.fromisoformat(parts[0])
+        end = date_class.fromisoformat(parts[1])
     except ValueError:
         await send_telegram_message(chat_id, "❌ Invalid date format. Use YYYY-MM-DD")
         return
