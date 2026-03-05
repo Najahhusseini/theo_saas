@@ -357,7 +357,25 @@ async def handle_callback_query(callback, db: Session):
                 await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
             return {"status": "success"}
 
-                # Handle bookings date range selection - end date
+                        # Handle bookings date range selection - start date
+        if callback_data.startswith("bookings_start_"):
+            date_str = callback_data.replace("bookings_start_", "")
+            logger.info(f"📅 Bookings start date selected: {date_str}")
+            try:
+                selected_date = date.fromisoformat(date_str)
+                # Store start date in a temporary dict (use chat_id as key)
+                if not hasattr(handle_callback_query, "bookings_start_dates"):
+                    handle_callback_query.bookings_start_dates = {}
+                handle_callback_query.bookings_start_dates[chat_id] = selected_date
+                
+                # Now ask for end date
+                await ask_for_end_date(chat_id, selected_date, db)
+            except ValueError as e:
+                logger.error(f"❌ Date parsing error: {e}")
+                await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
+            return {"status": "success"}
+
+        # Handle bookings date range selection - end date
         elif callback_data.startswith("bookings_end_"):
             date_str = callback_data.replace("bookings_end_", "")
             logger.info(f"📅 Bookings end date selected: {date_str}")
@@ -387,7 +405,13 @@ async def handle_callback_query(callback, db: Session):
                 
                 logger.info(f"✅ Calling handle_bookings_command with {start_date} {end_date}")
                 # Show bookings for the selected range
-                await handle_bookings_command(chat_id, f"{start_date} {end_date}", db)
+                try:
+                    await handle_bookings_command(chat_id, f"{start_date} {end_date}", db)
+                except Exception as e:
+                    logger.error(f"❌ Error in bookings command: {e}", exc_info=True)
+                    # Don't send error message to user if it's just "no bookings"
+                    if "No bookings found" not in str(e):
+                        await send_telegram_message(chat_id, "❌ Error processing date selection")
             except ValueError as e:
                 logger.error(f"❌ Date parsing error: {e}")
                 await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
@@ -1241,6 +1265,8 @@ async def handle_availability_command(chat_id: int, args: str, db: Session):
 
 async def ask_for_end_date(chat_id: int, start_date: date, db: Session):
     """Show date picker for end date selection"""
+    from services.telegram import send_telegram_message as send_msg
+    
     logger.info(f"📅 Asking for end date after start date: {start_date}")
     
     # Create buttons for next 14 days (starting from start_date)
@@ -1270,7 +1296,7 @@ async def ask_for_end_date(chat_id: int, start_date: date, db: Session):
         {"text": "❌ Cancel", "callback_data": "bookings_cancel"}
     ])
     
-    await send_telegram_message(
+    await send_msg(
         chat_id,
         f"📅 *Select End Date*\n\nStart date: {start_date.strftime('%d %b %Y')}\n\nPlease select an end date:",
         reply_markup=keyboard
@@ -1321,6 +1347,8 @@ async def show_availability(chat_id: int, check_date: date, db: Session):
 # ==================== BOOKINGS COMMANDS ====================
 async def handle_bookings_command(chat_id: int, args: str, db: Session):
     """Usage: /bookings [YYYY-MM-DD YYYY-MM-DD] - if no dates provided, shows interactive date picker"""
+    from services.telegram import send_telegram_message as send_msg
+    
     parts = args.strip().split()
     
     # If no dates provided, show interactive date range selector
@@ -1355,7 +1383,7 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
             {"text": "❌ Cancel", "callback_data": "bookings_cancel"}
         ])
         
-        await send_telegram_message(
+        await send_msg(
             chat_id,
             "📅 *Select Start Date*\n\nChoose the first date of your booking range:",
             reply_markup=keyboard
@@ -1368,11 +1396,11 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
         start = date_class.fromisoformat(parts[0])
         end = date_class.fromisoformat(parts[1])
     except ValueError:
-        await send_telegram_message(chat_id, "❌ Invalid date format. Use YYYY-MM-DD")
+        await send_msg(chat_id, "❌ Invalid date format. Use YYYY-MM-DD")
         return
 
     if start > end:
-        await send_telegram_message(chat_id, "❌ Start date must be before end date.")
+        await send_msg(chat_id, "❌ Start date must be before end date.")
         return
 
     hotel_id = 1
@@ -1383,11 +1411,11 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
         bookings = get_booking_summary(db, hotel_id, start, end)
     except Exception as e:
         logger.error(f"Bookings query error: {e}")
-        await send_telegram_message(chat_id, "❌ Error retrieving bookings. Please try again.")
+        await send_msg(chat_id, "❌ Error retrieving bookings. Please try again.")
         return
 
     if not bookings:
-        await send_telegram_message(chat_id, f"📋 No bookings found from {start} to {end}.")
+        await send_msg(chat_id, f"📋 No bookings found from {start} to {end}.")
         return
 
     # Send summary first
@@ -1404,7 +1432,7 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
     for rt, count in room_counts.items():
         summary_msg += f"🏨 {rt}: {count} rooms ({guest_counts[rt]} guests)\n"
     
-    await send_telegram_message(chat_id, summary_msg)
+    await send_msg(chat_id, summary_msg)
 
     # Send detailed daily breakdown if there are multiple days
     if (end - start).days > 0:
@@ -1419,7 +1447,7 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
                 if len(daily_bookings) > 3:
                     detail_msg += f"  ... and {len(daily_bookings)-3} more\n"
         
-        await send_telegram_message(chat_id, detail_msg)
+        await send_msg(chat_id, detail_msg)
     
     return
 
