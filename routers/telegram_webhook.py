@@ -1420,6 +1420,39 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
                     detail_msg += f"  ... and {len(daily_bookings)-3} more\n"
         
         await send_telegram_message(chat_id, detail_msg)
+    
+    return
+
+    # Send summary first
+    summary_msg = f"📋 *Booking Summary*\n{start} → {end}\n\n"
+    summary_msg += f"📊 Total Bookings: {len(bookings)}\n"
+    
+    # Count by room type
+    room_counts = {}
+    guest_counts = {}
+    for b in bookings:
+        room_counts[b['room_type']] = room_counts.get(b['room_type'], 0) + b['rooms']
+        guest_counts[b['room_type']] = guest_counts.get(b['room_type'], 0) + b['guests']
+    
+    for rt, count in room_counts.items():
+        summary_msg += f"🏨 {rt}: {count} rooms ({guest_counts[rt]} guests)\n"
+    
+    await send_telegram_message(chat_id, summary_msg)
+
+    # Send detailed daily breakdown if there are multiple days
+    if (end - start).days > 0:
+        detail_msg = f"📅 *Daily Breakdown*\n\n"
+        for d, rooms in occupancy.items():
+            date_str = d
+            daily_bookings = [b for b in bookings if b['arrival'] <= date_str < b['departure']]
+            if daily_bookings:
+                detail_msg += f"*{date_str}*:\n"
+                for b in daily_bookings[:3]:  # Limit to 3 per day to avoid long messages
+                    detail_msg += f"  • #{b['id']}: {b['guest']} - {b['room_type']} ({b['guests']} guests)\n"
+                if len(daily_bookings) > 3:
+                    detail_msg += f"  ... and {len(daily_bookings)-3} more\n"
+        
+        await send_telegram_message(chat_id, detail_msg)
 
 # ==================== MODIFY COMMAND ====================
 async def handle_modify_command(chat_id: int, args: str, db: Session):
