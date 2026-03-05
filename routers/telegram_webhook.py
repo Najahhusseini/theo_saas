@@ -357,24 +357,6 @@ async def handle_callback_query(callback, db: Session):
                 await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
             return {"status": "success"}
 
-                        # Handle bookings date range selection - start date
-        if callback_data.startswith("bookings_start_"):
-            date_str = callback_data.replace("bookings_start_", "")
-            logger.info(f"📅 Bookings start date selected: {date_str}")
-            try:
-                selected_date = date.fromisoformat(date_str)
-                # Store start date in a temporary dict (use chat_id as key)
-                if not hasattr(handle_callback_query, "bookings_start_dates"):
-                    handle_callback_query.bookings_start_dates = {}
-                handle_callback_query.bookings_start_dates[chat_id] = selected_date
-                
-                # Now ask for end date
-                await ask_for_end_date(chat_id, selected_date, db)
-            except ValueError as e:
-                logger.error(f"❌ Date parsing error: {e}")
-                await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
-            return {"status": "success"}
-
         # Handle bookings date range selection - end date
         elif callback_data.startswith("bookings_end_"):
             date_str = callback_data.replace("bookings_end_", "")
@@ -408,16 +390,22 @@ async def handle_callback_query(callback, db: Session):
                 try:
                     await handle_bookings_command(chat_id, f"{start_date} {end_date}", db)
                 except Exception as e:
-                    logger.error(f"❌ Error in bookings command: {e}", exc_info=True)
-                    # Don't send error message to user if it's just "no bookings"
-                    if "No bookings found" not in str(e):
+                    error_str = str(e)
+                    logger.error(f"❌ Error in bookings command: {error_str}")
+                    # Only send error message if it's a real error, not just "no bookings"
+                    if "No bookings found" not in error_str:
                         await send_telegram_message(chat_id, "❌ Error processing date selection")
+                    else:
+                        # This was just the "no bookings" message, which is fine
+                        logger.info("No bookings found - this is normal")
             except ValueError as e:
                 logger.error(f"❌ Date parsing error: {e}")
                 await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
             except Exception as e:
                 logger.error(f"❌ Unexpected error: {e}", exc_info=True)
-                await send_telegram_message(chat_id, "❌ Error processing date selection")
+                # Check if this is the "No bookings found" case
+                if "No bookings found" not in str(e):
+                    await send_telegram_message(chat_id, "❌ Error processing date selection")
             return {"status": "success"}
 
         elif callback_data == "bookings_cancel":
@@ -1348,6 +1336,7 @@ async def show_availability(chat_id: int, check_date: date, db: Session):
 async def handle_bookings_command(chat_id: int, args: str, db: Session):
     """Usage: /bookings [YYYY-MM-DD YYYY-MM-DD] - if no dates provided, shows interactive date picker"""
     from services.telegram import send_telegram_message as send_msg
+    from datetime import date as date_class
     
     parts = args.strip().split()
     
@@ -1390,9 +1379,8 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
         )
         return
     
-    # If dates provided, proceed with the existing logic
+    # Parse dates first
     try:
-        from datetime import date as date_class
         start = date_class.fromisoformat(parts[0])
         end = date_class.fromisoformat(parts[1])
     except ValueError:
@@ -1415,6 +1403,7 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
         return
 
     if not bookings:
+        # Now start and end are defined and in scope
         await send_msg(chat_id, f"📋 No bookings found from {start} to {end}.")
         return
 
@@ -1450,37 +1439,6 @@ async def handle_bookings_command(chat_id: int, args: str, db: Session):
         await send_msg(chat_id, detail_msg)
     
     return
-
-    # Send summary first
-    summary_msg = f"📋 *Booking Summary*\n{start} → {end}\n\n"
-    summary_msg += f"📊 Total Bookings: {len(bookings)}\n"
-    
-    # Count by room type
-    room_counts = {}
-    guest_counts = {}
-    for b in bookings:
-        room_counts[b['room_type']] = room_counts.get(b['room_type'], 0) + b['rooms']
-        guest_counts[b['room_type']] = guest_counts.get(b['room_type'], 0) + b['guests']
-    
-    for rt, count in room_counts.items():
-        summary_msg += f"🏨 {rt}: {count} rooms ({guest_counts[rt]} guests)\n"
-    
-    await send_telegram_message(chat_id, summary_msg)
-
-    # Send detailed daily breakdown if there are multiple days
-    if (end - start).days > 0:
-        detail_msg = f"📅 *Daily Breakdown*\n\n"
-        for d, rooms in occupancy.items():
-            date_str = d
-            daily_bookings = [b for b in bookings if b['arrival'] <= date_str < b['departure']]
-            if daily_bookings:
-                detail_msg += f"*{date_str}*:\n"
-                for b in daily_bookings[:3]:  # Limit to 3 per day to avoid long messages
-                    detail_msg += f"  • #{b['id']}: {b['guest']} - {b['room_type']} ({b['guests']} guests)\n"
-                if len(daily_bookings) > 3:
-                    detail_msg += f"  ... and {len(daily_bookings)-3} more\n"
-        
-        await send_telegram_message(chat_id, detail_msg)
 
 # ==================== MODIFY COMMAND ====================
 async def handle_modify_command(chat_id: int, args: str, db: Session):
