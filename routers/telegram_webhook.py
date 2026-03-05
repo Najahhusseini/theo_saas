@@ -711,6 +711,78 @@ async def handle_callback_query(callback, db: Session):
             await send_telegram_message(chat_id, f"❌ Unknown action: {action}")
         
         return {"status": "success"}
+            # ===== OCCUPANCY HANDLERS =====
+        if callback_data.startswith("occupancy_date_"):
+            date_str = callback_data.replace("occupancy_date_", "")
+            logger.info(f"📊 Occupancy date selected: {date_str}")
+            try:
+                selected_date = date.fromisoformat(date_str)
+                await show_occupancy_for_date(chat_id, selected_date, db)
+            except ValueError as e:
+                logger.error(f"❌ Date parsing error: {e}")
+                await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
+            return {"status": "success"}
+
+        elif callback_data == "occupancy_today":
+            logger.info("📊 Occupancy for today requested")
+            today = datetime.now().date()
+            await show_occupancy_for_date(chat_id, today, db)
+            return {"status": "success"}
+
+        elif callback_data == "occupancy_week":
+            logger.info("📊 Occupancy for this week requested")
+            today = datetime.now().date()
+            start_of_week = today - timedelta(days=today.weekday())
+            end_of_week = start_of_week + timedelta(days=6)
+            await show_occupancy_for_range(chat_id, start_of_week, end_of_week, db)
+            return {"status": "success"}
+
+        elif callback_data == "occupancy_month":
+            logger.info("📊 Occupancy for this month requested")
+            today = datetime.now().date()
+            start_of_month = today.replace(day=1)
+            # Calculate end of month
+            if today.month == 12:
+                end_of_month = today.replace(year=today.year+1, month=1, day=1) - timedelta(days=1)
+            else:
+                end_of_month = today.replace(month=today.month+1, day=1) - timedelta(days=1)
+            await show_occupancy_for_range(chat_id, start_of_month, end_of_month, db)
+            return {"status": "success"}
+
+        elif callback_data.startswith("occupancy_prev_"):
+            date_str = callback_data.replace("occupancy_prev_", "")
+            try:
+                current_date = date.fromisoformat(date_str)
+                prev_date = current_date - timedelta(days=1)
+                await show_occupancy_for_date(chat_id, prev_date, db)
+            except:
+                await send_telegram_message(chat_id, "❌ Error loading previous day")
+            return {"status": "success"}
+
+        elif callback_data.startswith("occupancy_next_"):
+            date_str = callback_data.replace("occupancy_next_", "")
+            try:
+                current_date = date.fromisoformat(date_str)
+                next_date = current_date + timedelta(days=1)
+                await show_occupancy_for_date(chat_id, next_date, db)
+            except:
+                await send_telegram_message(chat_id, "❌ Error loading next day")
+            return {"status": "success"}
+
+        elif callback_data == "occupancy_cancel":
+            logger.info("❌ Occupancy check cancelled")
+            await send_telegram_message(chat_id, "❌ Occupancy check cancelled.")
+            return {"status": "success"}
+
+        elif callback_data == "occupancy_compare":
+            logger.info("📊 Compare occupancy requested")
+            await send_telegram_message(chat_id, 
+                "📊 *Compare Occupancy*\n\n"
+                "This feature is coming soon! You'll be able to compare occupancy across different periods.\n\n"
+                "For now, try:\n"
+                "• /occupancy 2026-03-01 2026-03-07\n"
+                "• /occupancy 2026-03-08 2026-03-14")
+            return {"status": "success"}
         
     except Exception as e:
         logger.error(f"Error in handle_callback_query: {str(e)}", exc_info=True)
@@ -1010,6 +1082,9 @@ async def handle_text_message(message, db: Session):
                 return {"status": "command_processed"}
             elif text.startswith('/modify'):
                 await handle_modify_command(chat_id, text[8:], db)
+                return {"status": "command_processed"}
+            elif text.startswith('/occupancy'):
+                await handle_occupancy_command(chat_id, text[11:], db)
                 return {"status": "command_processed"}
             else:
                 await send_telegram_message(
@@ -1853,3 +1928,255 @@ async def edit_message_text(chat_id: int, message_id: int, text: str):
     except Exception as e:
         logger.error(f"Failed to edit message: {e}")
         return None
+
+async def show_occupancy_for_date(chat_id: int, check_date: date, db: Session):
+    """Show occupancy report for a single date"""
+    from services.telegram import send_telegram_message as send_msg
+    from services.availability import get_daily_occupancy
+    from datetime import datetime
+    
+    hotel_id = 1
+    
+    try:
+        # Get occupancy data
+        occupancy = get_daily_occupancy(db, hotel_id, check_date, check_date)
+        day_data = occupancy.get(check_date.isoformat(), {})
+        
+        if not day_data:
+            await send_msg(chat_id, f"📊 No occupancy data found for {check_date}.")
+            return
+        
+        # Calculate totals
+        total_rooms = sum(data['total'] for data in day_data.values())
+        total_booked = sum(data['booked'] for data in day_data.values())
+        total_guests = sum(data['guests'] for data in day_data.values())
+        
+        # Calculate occupancy percentage
+        occupancy_pct = round((total_booked / total_rooms * 100) if total_rooms > 0 else 0)
+        
+        # Create progress bar (10 blocks = 100%)
+        progress_blocks = round(occupancy_pct / 10)
+        progress_bar = "█" * progress_blocks + "░" * (10 - progress_blocks)
+        
+        # Build message
+        message = f"""
+📊 *OCCUPANCY REPORT*
+━━━━━━━━━━━━━━━━━━━
+📅 *Date:* {check_date.strftime('%d %b %Y')}
+
+🏨 *Overall Occupancy*
+{progress_bar} {occupancy_pct}% ({total_booked}/{total_rooms} rooms)
+
+📊 *By Room Type*
+"""
+        
+        # Add room type breakdown
+        for rt_name, data in day_data.items():
+            if data['total'] > 0:
+                rt_pct = round((data['booked'] / data['total'] * 100))
+                rt_blocks = round(rt_pct / 10)
+                rt_bar = "█" * rt_blocks + "░" * (10 - rt_blocks)
+                message += f"• {rt_name}: {rt_bar} {rt_pct}% ({data['booked']}/{data['total']})\n"
+        
+        message += f"""
+👥 *Guest Statistics*
+• Total Guests: {total_guests}
+• Avg per room: {round(total_guests/total_booked, 1) if total_booked > 0 else 0}
+
+━━━━━━━━━━━━━━━━━━━
+💡 *Quick Actions*
+"""
+        
+        # Add action buttons
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "◀️ Previous", "callback_data": f"occupancy_prev_{check_date}"},
+                    {"text": "Next ▶️", "callback_data": f"occupancy_next_{check_date}"}
+                ],
+                [
+                    {"text": "📅 This Week", "callback_data": "occupancy_week"},
+                    {"text": "📅 This Month", "callback_data": "occupancy_month"}
+                ],
+                [
+                    {"text": "🔄 Refresh", "callback_data": f"occupancy_date_{check_date}"}
+                ]
+            ]
+        }
+        
+        await send_msg(chat_id, message, reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error(f"Error generating occupancy report: {e}")
+        await send_msg(chat_id, "❌ Error generating occupancy report.")
+
+async def show_occupancy_for_range(chat_id: int, start_date: date, end_date: date, db: Session):
+    """Show average occupancy for a date range"""
+    from services.telegram import send_telegram_message as send_msg
+    from services.availability import get_daily_occupancy
+    from datetime import datetime, timedelta
+    
+    hotel_id = 1
+    delta_days = (end_date - start_date).days + 1
+    
+    try:
+        # Get occupancy data for range
+        occupancy = get_daily_occupancy(db, hotel_id, start_date, end_date)
+        
+        if not occupancy:
+            await send_msg(chat_id, f"📊 No occupancy data found for {start_date} to {end_date}.")
+            return
+        
+        # Calculate averages
+        room_totals = {}
+        guest_totals = {}
+        daily_counts = 0
+        
+        for date_str, day_data in occupancy.items():
+            daily_counts += 1
+            for rt_name, data in day_data.items():
+                if rt_name not in room_totals:
+                    room_totals[rt_name] = {'total': data['total'], 'booked': 0, 'days': 0}
+                room_totals[rt_name]['booked'] += data['booked']
+                room_totals[rt_name]['days'] += 1
+                guest_totals[rt_name] = guest_totals.get(rt_name, 0) + data['guests']
+        
+        # Calculate overall averages
+        total_rooms = sum(rt['total'] for rt in room_totals.values())
+        avg_booked = sum(rt['booked'] for rt in room_totals.values()) / daily_counts if daily_counts > 0 else 0
+        avg_guests = sum(guest_totals.values()) / daily_counts if daily_counts > 0 else 0
+        
+        avg_occupancy_pct = round((avg_booked / total_rooms * 100) if total_rooms > 0 else 0)
+        progress_blocks = round(avg_occupancy_pct / 10)
+        progress_bar = "█" * progress_blocks + "░" * (10 - progress_blocks)
+        
+        # Build message
+        message = f"""
+📊 *OCCUPANCY REPORT*
+━━━━━━━━━━━━━━━━━━━
+📅 *Period:* {start_date.strftime('%d %b %Y')} → {end_date.strftime('%d %b %Y')}
+📊 *Days:* {daily_counts}
+
+🏨 *Average Occupancy*
+{progress_bar} {avg_occupancy_pct}% ({round(avg_booked, 1)}/{total_rooms} rooms avg)
+
+📊 *By Room Type (Daily Average)*
+"""
+        
+        for rt_name, rt_data in room_totals.items():
+            avg_rt_booked = rt_data['booked'] / rt_data['days'] if rt_data['days'] > 0 else 0
+            avg_rt_pct = round((avg_rt_booked / rt_data['total'] * 100))
+            rt_blocks = round(avg_rt_pct / 10)
+            rt_bar = "█" * rt_blocks + "░" * (10 - rt_blocks)
+            message += f"• {rt_name}: {rt_bar} {avg_rt_pct}% ({round(avg_rt_booked, 1)}/{rt_data['total']})\n"
+        
+        message += f"""
+👥 *Guest Statistics*
+• Avg daily guests: {round(avg_guests, 1)}
+
+━━━━━━━━━━━━━━━━━━━
+💡 *Quick Actions*
+"""
+        
+        # Add action buttons
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "📅 Daily View", "callback_data": f"occupancy_date_{start_date}"},
+                    {"text": "📊 Compare", "callback_data": "occupancy_compare"}
+                ],
+                [
+                    {"text": "◀️ Previous Period", "callback_data": f"occupancy_prev_range_{start_date}_{end_date}"},
+                    {"text": "Next Period ▶️", "callback_data": f"occupancy_next_range_{start_date}_{end_date}"}
+                ]
+            ]
+        }
+        
+        await send_msg(chat_id, message, reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error(f"Error generating range occupancy report: {e}")
+        await send_msg(chat_id, "❌ Error generating occupancy report.")
+
+#======================== OCCUPANCY============================
+async def handle_occupancy_command(chat_id: int, args: str, db: Session):
+    """Usage: /occupancy [date] or /occupancy [start_date] [end_date] - Show occupancy report"""
+    from services.telegram import send_telegram_message as send_msg
+    from services.availability import get_daily_occupancy
+    from datetime import datetime, date, timedelta
+    
+    parts = args.strip().split()
+    
+    # If no date provided, show interactive date picker
+    if not parts:
+        logger.info("No date provided, showing occupancy date picker")
+        
+        # Create buttons for next 7 days
+        today = datetime.now().date()
+        keyboard = {
+            "inline_keyboard": []
+        }
+        
+        # Add rows of 3 dates each
+        row = []
+        for i in range(7):
+            pick_date = today + timedelta(days=i)
+            date_str = pick_date.strftime("%Y-%m-%d")
+            display = pick_date.strftime("%d %b")
+            
+            row.append({
+                "text": display,
+                "callback_data": f"occupancy_date_{date_str}"
+            })
+            
+            # Create new row every 3 buttons
+            if len(row) == 3 or i == 6:
+                keyboard["inline_keyboard"].append(row)
+                row = []
+        
+        # Add quick select buttons
+        keyboard["inline_keyboard"].append([
+            {"text": "📅 Today", "callback_data": "occupancy_today"},
+            {"text": "📅 This Week", "callback_data": "occupancy_week"},
+            {"text": "📅 This Month", "callback_data": "occupancy_month"}
+        ])
+        
+        # Add cancel button
+        keyboard["inline_keyboard"].append([
+            {"text": "❌ Cancel", "callback_data": "occupancy_cancel"}
+        ])
+        
+        await send_msg(
+            chat_id,
+            "📊 *Select Date for Occupancy Report*\n\nChoose a date or quick period:",
+            reply_markup=keyboard
+        )
+        return
+    
+    # Parse dates based on number of arguments
+    hotel_id = 1
+    
+    try:
+        from datetime import date as date_class
+        
+        if len(parts) == 1:
+            # Single date
+            check_date = date_class.fromisoformat(parts[0])
+            await show_occupancy_for_date(chat_id, check_date, db)
+            
+        elif len(parts) == 2:
+            # Date range
+            start_date = date_class.fromisoformat(parts[0])
+            end_date = date_class.fromisoformat(parts[1])
+            
+            if start_date > end_date:
+                await send_msg(chat_id, "❌ Start date must be before end date.")
+                return
+            
+            await show_occupancy_for_range(chat_id, start_date, end_date, db)
+        else:
+            await send_msg(chat_id, "❌ Invalid format. Use: /occupancy [date] or /occupancy [start] [end]")
+            
+    except ValueError as e:
+        logger.error(f"Date parsing error: {e}")
+        await send_msg(chat_id, "❌ Invalid date format. Use YYYY-MM-DD")
