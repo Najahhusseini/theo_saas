@@ -712,6 +712,9 @@ async def handle_callback_query(callback, db: Session):
         
         return {"status": "success"}
             # ===== OCCUPANCY HANDLERS =====
+
+
+        # ===== OCCUPANCY HANDLERS =====
         if callback_data.startswith("occupancy_date_"):
             date_str = callback_data.replace("occupancy_date_", "")
             logger.info(f"📊 Occupancy date selected: {date_str}")
@@ -749,6 +752,11 @@ async def handle_callback_query(callback, db: Session):
             await show_occupancy_for_range(chat_id, start_of_month, end_of_month, db)
             return {"status": "success"}
 
+        elif callback_data == "occupancy_cancel":
+            logger.info("❌ Occupancy check cancelled")
+            await send_telegram_message(chat_id, "❌ Occupancy check cancelled.")
+            return {"status": "success"}
+
         elif callback_data.startswith("occupancy_prev_"):
             date_str = callback_data.replace("occupancy_prev_", "")
             try:
@@ -768,6 +776,9 @@ async def handle_callback_query(callback, db: Session):
             except:
                 await send_telegram_message(chat_id, "❌ Error loading next day")
             return {"status": "success"}
+
+        # ===== BOOKINGS HANDLERS =====
+        # ... (your existing bookings handlers) ...
 
         elif callback_data == "occupancy_cancel":
             logger.info("❌ Occupancy check cancelled")
