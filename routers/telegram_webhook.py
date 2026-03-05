@@ -1559,12 +1559,9 @@ async def show_availability(chat_id: int, check_date: date, db: Session):
         
     except Exception as e:
         logger.error(f"❌ Availability error: {e}", exc_info=True)
-        logger.info(f"Trying to send error message...")
-        try:
-            result = await send_telegram_message(chat_id, "❌ Error checking availability.")
-            logger.info(f"✅ Error message sent: {result}")
-        except Exception as e2:
-            logger.error(f"❌ Even error message failed: {e2}", exc_info=True)
+        # Only send error if we haven't already sent a response
+        if 'msg' not in locals():
+            await send_telegram_message(chat_id, "❌ Sorry, I couldn't check availability right now. Please try again later.")
 async def handle_bookings_command(chat_id: int, args: str, db: Session):
     """Usage: /bookings YYYY-MM-DD YYYY-MM-DD"""
     parts = args.strip().split()
