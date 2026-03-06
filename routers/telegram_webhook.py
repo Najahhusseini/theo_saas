@@ -449,6 +449,7 @@ async def handle_callback_query(callback, db: Session):
                 await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
             return {"status": "success"}
 
+        # ===== FIXED BOOKINGS END DATE HANDLER =====
         elif callback_data.startswith("bookings_end_"):
             date_str = callback_data.replace("bookings_end_", "")
             logger.info(f"📅 Bookings end date selected: {date_str}")
@@ -476,20 +477,15 @@ async def handle_callback_query(callback, db: Session):
                     return {"status": "error"}
                 
                 logger.info(f"✅ Calling handle_bookings_command with {start_date} {end_date}")
-                try:
-                    await handle_bookings_command(chat_id, f"{start_date} {end_date}", db)
-                except Exception as e:
-                    error_str = str(e)
-                    logger.error(f"❌ Error in bookings command: {error_str}")
-                    if "No bookings found" not in error_str:
-                        await send_telegram_message(chat_id, "❌ Error processing date selection")
-                    else:
-                        logger.info("No bookings found - this is normal")
+                # Directly call the function - let it handle its own errors
+                await handle_bookings_command(chat_id, f"{start_date} {end_date}", db)
+                
             except ValueError as e:
                 logger.error(f"❌ Date parsing error: {e}")
                 await send_telegram_message(chat_id, f"❌ Invalid date format: {date_str}")
             except Exception as e:
-                logger.error(f"❌ Unexpected error: {e}", exc_info=True)
+                logger.error(f"❌ Unexpected error in bookings: {e}", exc_info=True)
+                # Only send error if it's not the "no bookings" case
                 if "No bookings found" not in str(e):
                     await send_telegram_message(chat_id, "❌ Error processing date selection")
             return {"status": "success"}
@@ -521,7 +517,7 @@ async def handle_callback_query(callback, db: Session):
             await edit_message_text(chat_id, message_id, f"❌ Cancellation aborted for Booking #{booking_id}")
             return {"status": "success"}
         
-        # ===== SPECIAL ACTIONS (STATS, TODAY, PENDING, HELP, STATUS, ROOMTYPES, ARRIVALS, DEPARTURES, MENU, AVAILABILITY, BOOKINGS, OCCUPANCY_TODAY) =====
+        # ===== SPECIAL ACTIONS =====
         if callback_data in ["stats", "today", "pending", "help", "status", "roomtypes", "arrivals", "departures", "menu", "availability", "bookings", "occupancy_today"]:
             if callback_data == "stats":
                 logger.info("Processing stats command from callback")
@@ -799,7 +795,6 @@ async def handle_callback_query(callback, db: Session):
     except Exception as e:
         logger.error(f"Error in handle_callback_query: {str(e)}", exc_info=True)
         return {"status": "error", "message": str(e)}
-
 # ==================== AVAILABILITY COMMANDS ====================
 async def handle_availability_command(chat_id: int, args: str, db: Session):
     """Usage: /availability [YYYY-MM-DD] [room_type]"""
