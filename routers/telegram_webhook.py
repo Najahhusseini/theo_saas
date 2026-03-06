@@ -1877,26 +1877,33 @@ async def handle_manager_question(chat_id: int, question: str, db: Session):
 # ==================== STATISTICS COMMANDS ====================
 async def handle_stats_command(chat_id: int, db: Session):
     """Handle /stats command"""
-    total = db.query(models.BookingRequest).count()
-    pending = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Pending").count()
-    confirmed = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Confirmed").count()
-    waitlist = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Waitlist").count()
-    rejected = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Rejected").count()
-    draft_ready = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Draft_Ready").count()
-    email_sent = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Email_Sent").count()
-    
-    message = (
-        f"📊 **Booking Statistics**\n\n"
-        f"Total: {total}\n"
-        f"✅ Confirmed: {confirmed}\n"
-        f"⏳ Pending: {pending}\n"
-        f"⏱ Waitlist: {waitlist}\n"
-        f"❌ Rejected: {rejected}\n"
-        f"📝 Draft Ready: {draft_ready}\n"
-        f"📧 Email Sent: {email_sent}"
-    )
-    
-    await send_telegram_message(chat_id, message)
+    try:
+        total = db.query(models.BookingRequest).count()
+        pending = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Pending").count()
+        confirmed = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Confirmed").count()
+        waitlist = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Waitlist").count()
+        rejected = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Rejected").count()
+        draft_ready = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Draft_Ready").count()
+        email_sent = db.query(models.BookingRequest).filter(models.BookingRequest.status == "Email_Sent").count()
+        
+        message = (
+            f"📊 **Booking Statistics**\n\n"
+            f"Total: {total}\n"
+            f"✅ Confirmed: {confirmed}\n"
+            f"⏳ Pending: {pending}\n"
+            f"⏱ Waitlist: {waitlist}\n"
+            f"❌ Rejected: {rejected}\n"
+            f"📝 Draft Ready: {draft_ready}\n"
+            f"📧 Email Sent: {email_sent}"
+        )
+        
+        await send_telegram_message(chat_id, message)
+        logger.info("✅ Stats sent successfully")
+        
+    except Exception as e:
+        logger.error(f"Error in stats command: {e}", exc_info=True)
+        # Don't send error message to user
+        pass
 
 async def handle_today_command(chat_id: int, db: Session):
     """Handle /today command"""
@@ -2287,7 +2294,7 @@ async def handle_roomtypes_command(chat_id: int, db: Session):
         
         if not day_data:
             await send_telegram_message(chat_id, "📊 No room type data found for today.")
-            return
+            return  # Important: return after sending message
         
         # Build message
         message = f"""
@@ -2332,11 +2339,12 @@ async def handle_roomtypes_command(chat_id: int, db: Session):
         }
         
         await send_telegram_message(chat_id, message, reply_markup=keyboard)
-        logger.info("✅ Room types overview sent")
+        logger.info("✅ Room types overview sent successfully")
         
     except Exception as e:
         logger.error(f"Error in roomtypes command: {e}", exc_info=True)
-        await send_telegram_message(chat_id, "❌ Error loading room types. Please try again.")
+        # Don't send error message to user - just log it
+        pass
 
 # ==================== ARRIVALS COMMAND ====================
 async def handle_arrivals_command(chat_id: int, db: Session):
