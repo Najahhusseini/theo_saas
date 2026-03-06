@@ -274,6 +274,7 @@ async def handle_modification_actions(action: str, modification_id: int, chat_id
 
 # ==================== CALLBACK QUERY HANDLER ====================
 async def handle_callback_query(callback, db: Session):
+    from datetime import datetime
     """Handle inline keyboard button presses"""
     try:
         callback_data = callback["data"]
