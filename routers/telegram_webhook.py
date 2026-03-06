@@ -411,6 +411,30 @@ async def handle_callback_query(callback, db: Session):
                 "• /occupancy 2026-03-08 2026-03-14")
             return {"status": "success"}
         
+        elif callback_data.startswith("occupancy_prev_week_"):
+            date_str = callback_data.replace("occupancy_prev_week_", "")
+            try:
+                current_date = date.fromisoformat(date_str)
+                prev_week_start = current_date - timedelta(days=7)
+                prev_week_end = prev_week_start + timedelta(days=6)
+                await show_occupancy_for_range(chat_id, prev_week_start, prev_week_end, db)
+            except Exception as e:
+                logger.error(f"Error loading previous week: {e}")
+                await send_telegram_message(chat_id, "❌ Error loading previous week")
+            return {"status": "success"}
+
+        elif callback_data.startswith("occupancy_next_week_"):
+            date_str = callback_data.replace("occupancy_next_week_", "")
+            try:
+                current_date = date.fromisoformat(date_str)
+                next_week_start = current_date + timedelta(days=7)
+                next_week_end = next_week_start + timedelta(days=6)
+                await show_occupancy_for_range(chat_id, next_week_start, next_week_end, db)
+            except Exception as e:
+                logger.error(f"Error loading next week: {e}")
+                await send_telegram_message(chat_id, "❌ Error loading next week")
+            return {"status": "success"}
+        
         # ===== BOOKINGS HANDLERS =====
         # Handle bookings date range selection - start date
         if callback_data.startswith("bookings_start_"):
@@ -511,9 +535,9 @@ async def handle_callback_query(callback, db: Session):
             await edit_message_text(chat_id, message_id, f"❌ Cancellation aborted for Booking #{booking_id}")
             return {"status": "success"}
         
-        # ===== SPECIAL ACTIONS (STATS, TODAY, PENDING, HELP, STATUS) =====
+        # ===== SPECIAL ACTIONS (STATS, TODAY, PENDING, HELP, STATUS, ROOMTYPES, ARRIVALS, DEPARTURES, MENU, AVAILABILITY, BOOKINGS, OCCUPANCY_TODAY) =====
         # Handle special actions without booking IDs
-        if callback_data in ["stats", "today", "pending", "help", "status"]:
+        if callback_data in ["stats", "today", "pending", "help", "status", "roomtypes", "arrivals", "departures", "menu", "availability", "bookings", "occupancy_today"]:
             if callback_data == "stats":
                 logger.info("Processing stats command from callback")
                 
@@ -557,6 +581,36 @@ async def handle_callback_query(callback, db: Session):
             elif callback_data == "status":
                 logger.info("🔄 Refreshing status dashboard")
                 await handle_status_command(chat_id, db)
+
+            elif callback_data == "roomtypes":
+                logger.info("🔄 Refreshing room types overview")
+                await handle_roomtypes_command(chat_id, db)
+
+            elif callback_data == "arrivals":
+                logger.info("🛬 Showing arrivals")
+                await handle_arrivals_command(chat_id, db)
+                
+            elif callback_data == "departures":
+                logger.info("🛫 Showing departures")
+                await handle_departures_command(chat_id, db)
+                
+            elif callback_data == "menu":
+                logger.info("🎯 Showing main menu")
+                await handle_menu_command(chat_id, db)
+                
+            elif callback_data == "availability":
+                logger.info("📅 Showing availability picker")
+                await handle_availability_command(chat_id, "", db)
+                
+            elif callback_data == "bookings":
+                logger.info("📋 Showing bookings picker")
+                await handle_bookings_command(chat_id, "", db)
+                
+            elif callback_data == "occupancy_today":
+                logger.info("📊 Showing today's occupancy")
+                from datetime import datetime
+                today = datetime.now().date()
+                await show_occupancy_for_date(chat_id, today, db)
                 
             elif callback_data == "today":
                 logger.info("Processing today command from callback")
@@ -1066,8 +1120,8 @@ async def handle_text_message(message, db: Session):
                 return {"status": "command_blocked"}
             
             # Normal mode commands
-            elif text == '/status':
-                await handle_status_command(chat_id, db)
+            if text == '/stats':
+                await handle_stats_command(chat_id, db)
                 return {"status": "command_processed"}
             elif text == '/today':
                 await handle_today_command(chat_id, db)
@@ -1084,8 +1138,23 @@ async def handle_text_message(message, db: Session):
             elif text.startswith('/modify'):
                 await handle_modify_command(chat_id, text[8:], db)
                 return {"status": "command_processed"}
+            elif text == '/status':
+                await handle_status_command(chat_id, db)
+                return {"status": "command_processed"}
             elif text.startswith('/occupancy'):
                 await handle_occupancy_command(chat_id, text[11:], db)
+                return {"status": "command_processed"}
+            elif text == '/roomtypes':
+                await handle_roomtypes_command(chat_id, db)
+                return {"status": "command_processed"}
+            elif text == '/arrivals':
+                await handle_arrivals_command(chat_id, db)
+                return {"status": "command_processed"}
+            elif text == '/departures':
+                await handle_departures_command(chat_id, db)
+                return {"status": "command_processed"}
+            elif text == '/menu' or text == '/start':
+                await handle_menu_command(chat_id, db)
                 return {"status": "command_processed"}
             else:
                 await send_telegram_message(
@@ -1591,6 +1660,7 @@ async def handle_modify_command(chat_id: int, args: str, db: Session):
         f"Please review it in the message above."
     )
 
+# ==================== STATUS COMMAND ====================
 async def handle_status_command(chat_id: int, db: Session):
     """Show real-time hotel status dashboard"""
     from services.telegram import send_telegram_message as send_msg
@@ -1888,16 +1958,16 @@ async def handle_help_command(chat_id: int):
         "/today - See today's arrivals/departures\n"
         "/pending - List pending bookings\n"
         "/modify <id> - Start modification for a confirmed booking\n"
-        "/status <id> - Check booking status\n\n"
+        "/status - Hotel status dashboard\n\n"
         "**Availability & Reports:**\n"
         "/availability - Check room availability (interactive date picker)\n"
         "/bookings - List bookings in a date range (interactive date picker)\n"
-        "/occupancy [date] - Show occupancy percentage\n"
-        "/roomtypes - List all room types\n"
-        "/arrivals - Today's check-ins\n"
-        "/departures - Today's check-outs\n\n"
+        "/occupancy [date] - Show occupancy percentage with progress bars\n"
+        "/roomtypes - List all room types with current availability\n"
+        "/arrivals - Today's check-ins only\n"
+        "/departures - Today's check-outs only\n\n"
         "**General:**\n"
-        "/menu - Show main menu\n"
+        "/menu - Show main menu with buttons\n"
         "/help - Show this message\n\n"
         "**Sample Questions:**\n"
         "• \"What's the check-in time?\"\n"
@@ -1930,6 +2000,7 @@ async def edit_message_text(chat_id: int, message_id: int, text: str):
         logger.error(f"Failed to edit message: {e}")
         return None
 
+# ==================== OCCUPANCY FUNCTIONS ====================
 async def show_occupancy_for_date(chat_id: int, check_date: date, db: Session):
     """Show occupancy report for a single date"""
     from services.telegram import send_telegram_message
@@ -2115,7 +2186,6 @@ async def show_occupancy_for_range(chat_id: int, start_date: date, end_date: dat
         # Just log the error, don't send anything to user
         pass
 
-#======================== OCCUPANCY============================
 async def handle_occupancy_command(chat_id: int, args: str, db: Session):
     """Usage: /occupancy [date] or /occupancy [start_date] [end_date] - Show occupancy report"""
     from services.telegram import send_telegram_message as send_msg
@@ -2197,3 +2267,221 @@ async def handle_occupancy_command(chat_id: int, args: str, db: Session):
     except ValueError as e:
         logger.error(f"Date parsing error: {e}")
         await send_msg(chat_id, "❌ Invalid date format. Use YYYY-MM-DD")
+
+# ==================== ROOM TYPES OVERVIEW ====================
+async def handle_roomtypes_command(chat_id: int, db: Session):
+    """Show overview of all room types with current availability"""
+    from services.telegram import send_telegram_message
+    from services.availability import get_daily_occupancy
+    from datetime import date, datetime
+    
+    logger.info(f"🏨 Processing roomtypes command for chat {chat_id}")
+    
+    hotel_id = 1
+    today = date.today()
+    
+    try:
+        # Get today's occupancy data
+        occupancy = get_daily_occupancy(db, hotel_id, today, today)
+        day_data = occupancy.get(today.isoformat(), {})
+        
+        if not day_data:
+            await send_telegram_message(chat_id, "📊 No room type data found for today.")
+            return
+        
+        # Build message
+        message = f"""
+🏨 *ROOM TYPES OVERVIEW*
+━━━━━━━━━━━━━━━━━━━
+📅 *Today:* {today.strftime('%d %b %Y')}
+
+"""
+        
+        # Add each room type
+        for rt_name, data in day_data.items():
+            if data['total'] > 0:
+                # Calculate occupancy percentage
+                pct = round((data['booked'] / data['total'] * 100))
+                blocks = round(pct / 10)
+                bar = "█" * blocks + "░" * (10 - blocks)
+                
+                message += f"""
+🛏 *{rt_name}* ({data['total']} rooms)
+{bar} {pct}% full
+• Available: {data['available']}
+• Booked: {data['booked']}
+• Guests: {data['guests']}
+"""
+        
+        message += """
+━━━━━━━━━━━━━━━━━━━
+💡 *Quick Actions*
+"""
+        
+        # Add action buttons
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "📅 Check Availability", "callback_data": "availability"},
+                    {"text": "📊 Occupancy", "callback_data": "occupancy_today"}
+                ],
+                [
+                    {"text": "🔄 Refresh", "callback_data": "roomtypes"}
+                ]
+            ]
+        }
+        
+        await send_telegram_message(chat_id, message, reply_markup=keyboard)
+        logger.info("✅ Room types overview sent")
+        
+    except Exception as e:
+        logger.error(f"Error in roomtypes command: {e}", exc_info=True)
+        await send_telegram_message(chat_id, "❌ Error loading room types. Please try again.")
+
+# ==================== ARRIVALS COMMAND ====================
+async def handle_arrivals_command(chat_id: int, db: Session):
+    """Show today's check-ins only"""
+    from services.telegram import send_telegram_message
+    from datetime import date
+    
+    logger.info(f"🛬 Processing arrivals command for chat {chat_id}")
+    
+    today = date.today()
+    
+    try:
+        arrivals = db.query(models.BookingRequest).filter(
+            models.BookingRequest.arrival_date == today
+        ).all()
+        
+        if not arrivals:
+            await send_telegram_message(chat_id, f"📅 No check-ins scheduled for today ({today.strftime('%d %b %Y')}).")
+            return
+        
+        message = f"""
+🛬 *TODAY'S CHECK-INS*
+━━━━━━━━━━━━━━━━━━━
+📅 *Date:* {today.strftime('%d %b %Y')}
+👥 *Total Guests:* {sum(b.number_of_guests for b in arrivals)}
+
+"""
+        
+        for b in arrivals[:10]:  # Limit to 10
+            message += f"• #{b.id}: {b.guest_name} - {b.room_type} ({b.number_of_guests} guests)\n"
+        
+        if len(arrivals) > 10:
+            message += f"\n... and {len(arrivals) - 10} more"
+        
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "📋 All Today", "callback_data": "today"},
+                    {"text": "🛫 Departures", "callback_data": "departures"}
+                ]
+            ]
+        }
+        
+        await send_telegram_message(chat_id, message, reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error(f"Error in arrivals command: {e}", exc_info=True)
+        await send_telegram_message(chat_id, "❌ Error loading check-ins.")
+
+# ==================== DEPARTURES COMMAND ====================
+async def handle_departures_command(chat_id: int, db: Session):
+    """Show today's check-outs only"""
+    from services.telegram import send_telegram_message
+    from datetime import date
+    
+    logger.info(f"🛫 Processing departures command for chat {chat_id}")
+    
+    today = date.today()
+    
+    try:
+        departures = db.query(models.BookingRequest).filter(
+            models.BookingRequest.departure_date == today
+        ).all()
+        
+        if not departures:
+            await send_telegram_message(chat_id, f"📅 No check-outs scheduled for today ({today.strftime('%d %b %Y')}).")
+            return
+        
+        message = f"""
+🛫 *TODAY'S CHECK-OUTS*
+━━━━━━━━━━━━━━━━━━━
+📅 *Date:* {today.strftime('%d %b %Y')}
+👥 *Total Guests:* {sum(b.number_of_guests for b in departures)}
+
+"""
+        
+        for b in departures[:10]:  # Limit to 10
+            message += f"• #{b.id}: {b.guest_name} - {b.room_type}\n"
+        
+        if len(departures) > 10:
+            message += f"\n... and {len(departures) - 10} more"
+        
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "📋 All Today", "callback_data": "today"},
+                    {"text": "🛬 Arrivals", "callback_data": "arrivals"}
+                ]
+            ]
+        }
+        
+        await send_telegram_message(chat_id, message, reply_markup=keyboard)
+        
+    except Exception as e:
+        logger.error(f"Error in departures command: {e}", exc_info=True)
+        await send_telegram_message(chat_id, "❌ Error loading check-outs.")
+
+# ==================== MENU COMMAND ====================
+async def handle_menu_command(chat_id: int, db: Session):
+    """Show main menu with all features"""
+    from services.telegram import send_telegram_message
+    from datetime import datetime
+    
+    logger.info(f"🎯 Processing menu command for chat {chat_id}")
+    
+    message = f"""
+🤖 *THeO HOTEL BOT*
+━━━━━━━━━━━━━━━━━━━
+Welcome to your hotel management assistant!
+
+*Quick Stats*
+📅 {datetime.now().strftime('%d %b %Y, %H:%M')}
+🏨 All systems operational
+
+*What would you like to do?*
+━━━━━━━━━━━━━━━━━━━
+"""
+
+    keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "🏨 Status", "callback_data": "status"},
+                {"text": "📊 Stats", "callback_data": "stats"}
+            ],
+            [
+                {"text": "📅 Today", "callback_data": "today"},
+                {"text": "⏳ Pending", "callback_data": "pending"}
+            ],
+            [
+                {"text": "🛬 Arrivals", "callback_data": "arrivals"},
+                {"text": "🛫 Departures", "callback_data": "departures"}
+            ],
+            [
+                {"text": "📅 Availability", "callback_data": "availability"},
+                {"text": "📋 Bookings", "callback_data": "bookings"}
+            ],
+            [
+                {"text": "📊 Occupancy", "callback_data": "occupancy_today"},
+                {"text": "🏨 Room Types", "callback_data": "roomtypes"}
+            ],
+            [
+                {"text": "❓ Help", "callback_data": "help"}
+            ]
+        ]
+    }
+    
+    await send_telegram_message(chat_id, message, reply_markup=keyboard)
+    logger.info("✅ Menu sent")
