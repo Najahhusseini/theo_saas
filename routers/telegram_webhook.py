@@ -435,6 +435,50 @@ async def handle_callback_query(callback, db: Session):
                 logger.error(f"Error loading next week: {e}")
                 await send_telegram_message(chat_id, "❌ Error loading next week")
             return {"status": "success"}
+        elif callback_data == "compare_week":
+            logger.info("📊 Week over week comparison requested")
+            today = datetime.now().date()
+            # Current week (last 7 days)
+            end_current = today
+            start_current = today - timedelta(days=6)
+            # Previous week
+            end_previous = start_current - timedelta(days=1)
+            start_previous = end_previous - timedelta(days=6)
+            
+            await compare_occupancy(chat_id, start_previous, end_previous, start_current, end_current, db)
+            return {"status": "success"}
+
+        elif callback_data == "compare_month":
+            logger.info("📊 Month over month comparison requested")
+            today = datetime.now().date()
+            # Current month
+            start_current = today.replace(day=1)
+            if today.month == 12:
+                end_current = today.replace(year=today.year+1, month=1, day=1) - timedelta(days=1)
+            else:
+                end_current = today.replace(month=today.month+1, day=1) - timedelta(days=1)
+            
+            # Previous month
+            if today.month == 1:
+                start_previous = today.replace(year=today.year-1, month=12, day=1)
+                end_previous = today.replace(year=today.year-1, month=12, day=31)
+            else:
+                start_previous = today.replace(month=today.month-1, day=1)
+                end_previous = today.replace(month=today.month, day=1) - timedelta(days=1)
+            
+            await compare_occupancy(chat_id, start_previous, end_previous, start_current, end_current, db)
+            return {"status": "success"}
+
+        elif callback_data == "compare_custom":
+            logger.info("📊 Custom comparison requested")
+            await send_telegram_message(chat_id,
+                "📊 *Custom Comparison*\n\n"
+                "To compare two custom periods, use:\n"
+                "• `/occupancy 2026-03-01 2026-03-07` for first period\n"
+                "• `/occupancy 2026-03-08 2026-03-14` for second period\n\n"
+                "Then compare the results manually.\n\n"
+                "We're working on an interactive comparison tool!")
+            return {"status": "success"}
         
         # ===== BOOKINGS HANDLERS =====
         # Handle bookings date range selection - start date
@@ -2192,6 +2236,129 @@ async def show_occupancy_for_range(chat_id: int, start_date: date, end_date: dat
     except Exception as e:
         logger.error(f"Error in show_occupancy_for_range: {e}", exc_info=True)
         # Just log the error, don't send anything to user
+        pass
+
+# ==================== COMPARE OCCUPANCY ====================
+async def compare_occupancy(chat_id: int, period1_start: date, period1_end: date, period2_start: date, period2_end: date, db: Session):
+    """Compare occupancy between two periods"""
+    from services.telegram import send_telegram_message
+    from services.availability import get_daily_occupancy
+    from datetime import datetime
+    
+    hotel_id = 1
+    
+    try:
+        # Get data for both periods
+        occupancy1 = get_daily_occupancy(db, hotel_id, period1_start, period1_end)
+        occupancy2 = get_daily_occupancy(db, hotel_id, period2_start, period2_end)
+        
+        # Calculate averages for period 1
+        room_totals1 = {}
+        daily_counts1 = 0
+        for date_str, day_data in occupancy1.items():
+            daily_counts1 += 1
+            for rt_name, data in day_data.items():
+                if rt_name not in room_totals1:
+                    room_totals1[rt_name] = {'total': data['total'], 'booked': 0, 'days': 0}
+                room_totals1[rt_name]['booked'] += data['booked']
+                room_totals1[rt_name]['days'] += 1
+        
+        # Calculate averages for period 2
+        room_totals2 = {}
+        daily_counts2 = 0
+        for date_str, day_data in occupancy2.items():
+            daily_counts2 += 1
+            for rt_name, data in day_data.items():
+                if rt_name not in room_totals2:
+                    room_totals2[rt_name] = {'total': data['total'], 'booked': 0, 'days': 0}
+                room_totals2[rt_name]['booked'] += data['booked']
+                room_totals2[rt_name]['days'] += 1
+        
+        if not room_totals1 or not room_totals2:
+            await send_telegram_message(chat_id, "📊 Insufficient data for comparison.")
+            return
+        
+        # Calculate overall averages
+        total_rooms = sum(rt['total'] for rt in room_totals1.values())
+        
+        avg_booked1 = sum(rt['booked'] for rt in room_totals1.values()) / daily_counts1 if daily_counts1 > 0 else 0
+        avg_booked2 = sum(rt['booked'] for rt in room_totals2.values()) / daily_counts2 if daily_counts2 > 0 else 0
+        
+        avg_occupancy_pct1 = round((avg_booked1 / total_rooms * 100) if total_rooms > 0 else 0)
+        avg_occupancy_pct2 = round((avg_booked2 / total_rooms * 100) if total_rooms > 0 else 0)
+        
+        # Calculate change
+        change = avg_occupancy_pct2 - avg_occupancy_pct1
+        change_emoji = "📈" if change > 0 else "📉" if change < 0 else "➡️"
+        change_sign = "+" if change > 0 else ""
+        
+        # Format period descriptions
+        period1_desc = f"{period1_start.strftime('%d %b')} - {period1_end.strftime('%d %b')}"
+        period2_desc = f"{period2_start.strftime('%d %b')} - {period2_end.strftime('%d %b')}"
+        
+        # Build message
+        message = f"""
+📊 *OCCUPANCY COMPARISON*
+━━━━━━━━━━━━━━━━━━━
+
+📅 *Period 1:* {period1_desc}
+📅 *Period 2:* {period2_desc}
+
+🏨 *Overall Occupancy*
+Period 1: {avg_occupancy_pct1}% ({round(avg_booked1, 1)}/{total_rooms} avg)
+Period 2: {avg_occupancy_pct2}% ({round(avg_booked2, 1)}/{total_rooms} avg)
+{change_emoji} Change: {change_sign}{change}%
+
+📊 *By Room Type*
+"""
+        
+        # Add room type comparison
+        for rt_name in room_totals1.keys():
+            if rt_name in room_totals2:
+                rt_data1 = room_totals1[rt_name]
+                rt_data2 = room_totals2[rt_name]
+                
+                avg_rt1 = rt_data1['booked'] / rt_data1['days'] if rt_data1['days'] > 0 else 0
+                avg_rt2 = rt_data2['booked'] / rt_data2['days'] if rt_data2['days'] > 0 else 0
+                
+                pct1 = round((avg_rt1 / rt_data1['total'] * 100)) if rt_data1['total'] > 0 else 0
+                pct2 = round((avg_rt2 / rt_data2['total'] * 100)) if rt_data2['total'] > 0 else 0
+                
+                rt_change = pct2 - pct1
+                rt_emoji = "📈" if rt_change > 0 else "📉" if rt_change < 0 else "➡️"
+                
+                # Create progress bars
+                blocks1 = round(pct1 / 10)
+                blocks2 = round(pct2 / 10)
+                bar1 = "█" * blocks1 + "░" * (10 - blocks1)
+                bar2 = "█" * blocks2 + "░" * (10 - blocks2)
+                
+                message += f"""
+• *{rt_name}*
+  P1: {bar1} {pct1}% ({round(avg_rt1, 1)}/{rt_data1['total']})
+  P2: {bar2} {pct2}% ({round(avg_rt2, 1)}/{rt_data2['total']})
+  {rt_emoji} Change: {rt_change:+d}%
+"""
+        
+        # Add quick action buttons
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "📅 Week over Week", "callback_data": "compare_week"},
+                    {"text": "📅 Month over Month", "callback_data": "compare_month"}
+                ],
+                [
+                    {"text": "🔄 Custom Compare", "callback_data": "compare_custom"}
+                ]
+            ]
+        }
+        
+        await send_telegram_message(chat_id, message, reply_markup=keyboard)
+        logger.info("✅ Comparison report sent")
+        
+    except Exception as e:
+        logger.error(f"Error in compare_occupancy: {e}", exc_info=True)
+        # Don't send error message to user
         pass
 
 async def handle_occupancy_command(chat_id: int, args: str, db: Session):
