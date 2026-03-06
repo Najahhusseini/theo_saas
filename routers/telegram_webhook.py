@@ -2355,7 +2355,7 @@ async def handle_arrivals_command(chat_id: int, db: Session):
         
         if not arrivals:
             await send_telegram_message(chat_id, f"📅 No check-ins scheduled for today ({today.strftime('%d %b %Y')}).")
-            return
+            return  # Important: return after sending message
         
         message = f"""
 🛬 *TODAY'S CHECK-INS*
@@ -2381,10 +2381,12 @@ async def handle_arrivals_command(chat_id: int, db: Session):
         }
         
         await send_telegram_message(chat_id, message, reply_markup=keyboard)
+        logger.info("✅ Arrivals message sent successfully")
         
     except Exception as e:
         logger.error(f"Error in arrivals command: {e}", exc_info=True)
-        await send_telegram_message(chat_id, "❌ Error loading check-ins.")
+        # Don't send error message to user - just log it
+        pass
 
 # ==================== DEPARTURES COMMAND ====================
 async def handle_departures_command(chat_id: int, db: Session):
@@ -2403,7 +2405,7 @@ async def handle_departures_command(chat_id: int, db: Session):
         
         if not departures:
             await send_telegram_message(chat_id, f"📅 No check-outs scheduled for today ({today.strftime('%d %b %Y')}).")
-            return
+            return  # Important: return after sending message
         
         message = f"""
 🛫 *TODAY'S CHECK-OUTS*
@@ -2429,11 +2431,12 @@ async def handle_departures_command(chat_id: int, db: Session):
         }
         
         await send_telegram_message(chat_id, message, reply_markup=keyboard)
+        logger.info("✅ Departures message sent successfully")
         
     except Exception as e:
         logger.error(f"Error in departures command: {e}", exc_info=True)
-        await send_telegram_message(chat_id, "❌ Error loading check-outs.")
-
+        # Don't send error message to user - just log it
+        pass
 # ==================== MENU COMMAND ====================
 async def handle_menu_command(chat_id: int, db: Session):
     """Show main menu with all features"""
@@ -2442,7 +2445,8 @@ async def handle_menu_command(chat_id: int, db: Session):
     
     logger.info(f"🎯 Processing menu command for chat {chat_id}")
     
-    message = f"""
+    try:
+        message = f"""
 🤖 *THeO HOTEL BOT*
 ━━━━━━━━━━━━━━━━━━━
 Welcome to your hotel management assistant!
@@ -2455,33 +2459,38 @@ Welcome to your hotel management assistant!
 ━━━━━━━━━━━━━━━━━━━
 """
 
-    keyboard = {
-        "inline_keyboard": [
-            [
-                {"text": "🏨 Status", "callback_data": "status"},
-                {"text": "📊 Stats", "callback_data": "stats"}
-            ],
-            [
-                {"text": "📅 Today", "callback_data": "today"},
-                {"text": "⏳ Pending", "callback_data": "pending"}
-            ],
-            [
-                {"text": "🛬 Arrivals", "callback_data": "arrivals"},
-                {"text": "🛫 Departures", "callback_data": "departures"}
-            ],
-            [
-                {"text": "📅 Availability", "callback_data": "availability"},
-                {"text": "📋 Bookings", "callback_data": "bookings"}
-            ],
-            [
-                {"text": "📊 Occupancy", "callback_data": "occupancy_today"},
-                {"text": "🏨 Room Types", "callback_data": "roomtypes"}
-            ],
-            [
-                {"text": "❓ Help", "callback_data": "help"}
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "🏨 Status", "callback_data": "status"},
+                    {"text": "📊 Stats", "callback_data": "stats"}
+                ],
+                [
+                    {"text": "📅 Today", "callback_data": "today"},
+                    {"text": "⏳ Pending", "callback_data": "pending"}
+                ],
+                [
+                    {"text": "🛬 Arrivals", "callback_data": "arrivals"},
+                    {"text": "🛫 Departures", "callback_data": "departures"}
+                ],
+                [
+                    {"text": "📅 Availability", "callback_data": "availability"},
+                    {"text": "📋 Bookings", "callback_data": "bookings"}
+                ],
+                [
+                    {"text": "📊 Occupancy", "callback_data": "occupancy_today"},
+                    {"text": "🏨 Room Types", "callback_data": "roomtypes"}
+                ],
+                [
+                    {"text": "❓ Help", "callback_data": "help"}
+                ]
             ]
-        ]
-    }
-    
-    await send_telegram_message(chat_id, message, reply_markup=keyboard)
-    logger.info("✅ Menu sent")
+        }
+        
+        await send_telegram_message(chat_id, message, reply_markup=keyboard)
+        logger.info("✅ Menu sent successfully")
+        
+    except Exception as e:
+        logger.error(f"Error in menu command: {e}", exc_info=True)
+        # Don't send error message to user
+        pass
