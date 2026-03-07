@@ -7,6 +7,7 @@ from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from fastapi.middleware.cors import CORSMiddleware
 
 import models
 from database import engine, get_db
@@ -66,6 +67,22 @@ app = FastAPI(
     title="THeO Hotel Booking Automation",
     description="API for hotel booking automation system with Telegram integration and modification tracking",
     version="2.0.0"
+)
+# 👇 ADD CORS MIDDLEWARE HERE - RIGHT AFTER CREATING APP
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://localhost:5173", 
+        "https://stackblitz.com", 
+        "https://*.stackblitz.io", 
+        "https://*.stackblitz.com",
+        "http://localhost:5173",  # Add HTTP version too
+        "http://localhost:3000",   # Common React port
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_origins=["*"],  # For development only! Use specific origins in production
 )
 
 # Include routers
