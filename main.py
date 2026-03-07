@@ -2,6 +2,8 @@ import os
 import logging
 from dotenv import load_dotenv
 from datetime import datetime
+from pydantic import BaseModel
+from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordRequestForm
@@ -10,6 +12,7 @@ from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 
 import models
+from models import HotelCreate  
 from database import engine, get_db
 from auth import (
     verify_password,
@@ -297,29 +300,41 @@ def test_telegram_connection():
 # -------------------------
 @app.post("/hotels/")
 def create_hotel(
-    name: str, 
-    subscription_plan: str, 
+    hotel: HotelCreate,
     db: Session = Depends(get_db)
 ):
-    """Create a new hotel"""
+    """Create a new hotel with complete information"""
     try:
+        # Check if hotel with same email already exists (optional)
+        if hotel.email:
+            existing = db.query(models.Hotel).filter(models.Hotel.email == hotel.email).first()
+            if existing:
+                raise HTTPException(status_code=400, detail="Hotel with this email already exists")
+        
+        # Create new hotel with all fields
         new_hotel = models.Hotel(
-            name=name,
-            subscription_plan=subscription_plan
+            name=hotel.name,
+            subscription_plan=hotel.subscription_plan,
+            address=hotel.address,
+            city=hotel.city,
+            country=hotel.country,
+            phone=hotel.phone,
+            email=hotel.email
         )
         
         db.add(new_hotel)
         db.commit()
         db.refresh(new_hotel)
         
-        logger.info(f"Created hotel: {name} (ID: {new_hotel.id})")
+        logger.info(f"✅ Created hotel: {hotel.name} (ID: {new_hotel.id})")
         return new_hotel
         
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error creating hotel: {e}")
+        logger.error(f"❌ Error creating hotel: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-
 # -------------------------
 # CREATE USER
 # -------------------------
