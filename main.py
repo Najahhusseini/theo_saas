@@ -338,17 +338,20 @@ def test_telegram_connection():
 # -------------------------
 # CREATE HOTEL
 # -------------------------
-@app.post("/hotels/", response_model=HotelCreate)
+@app.post("/hotels/")
 def create_hotel(
     hotel: HotelCreate,
     db: Session = Depends(get_db)
 ):
     """Create a new hotel with complete information"""
     try:
-        # Check if hotel with same email already exists (optional)
+        logger.info(f"📥 Received hotel creation request: {hotel.name}")
+        
+        # Check if hotel with same email already exists
         if hotel.email:
             existing = db.query(models.Hotel).filter(models.Hotel.email == hotel.email).first()
             if existing:
+                logger.warning(f"❌ Hotel with email {hotel.email} already exists")
                 raise HTTPException(status_code=400, detail="Hotel with this email already exists")
         
         # Create new hotel with all fields
@@ -367,9 +370,10 @@ def create_hotel(
         db.refresh(new_hotel)
         
         logger.info(f"✅ Created hotel: {hotel.name} (ID: {new_hotel.id})")
+        logger.info(f"📤 Returning hotel data with ID: {new_hotel.id}")
         
-        # Return the created hotel with ID
-        return {
+        # Return the created hotel with ALL fields including ID
+        response_data = {
             "id": new_hotel.id,
             "name": new_hotel.name,
             "subscription_plan": new_hotel.subscription_plan,
@@ -379,6 +383,9 @@ def create_hotel(
             "phone": new_hotel.phone,
             "email": new_hotel.email
         }
+        
+        logger.info(f"📤 Response data: {response_data}")
+        return response_data
         
     except HTTPException:
         raise
