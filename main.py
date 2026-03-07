@@ -72,12 +72,15 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://*.webcontainer.io", 
         "https://localhost:5173", 
         "https://stackblitz.com", 
         "https://*.stackblitz.io", 
         "https://*.stackblitz.com",
         "http://localhost:5173",  # Add HTTP version too
         "http://localhost:3000",   # Common React port
+        "*"
+
     ],
     allow_credentials=True,
     allow_methods=["*"],
