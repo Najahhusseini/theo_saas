@@ -61,7 +61,20 @@ try:
     models.Base.metadata.create_all(bind=engine)
     logger.info("Database tables created successfully")
 
-    models.Base.metadata.create_all(bind=engine)
+     # TEMPORARY: Add new columns if they don't exist
+    from sqlalchemy import text
+    with engine.connect() as conn:
+        # Check if address column exists, if not add it
+        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS address VARCHAR"))
+        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS city VARCHAR"))
+        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS country VARCHAR"))
+        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS phone VARCHAR"))
+        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS email VARCHAR"))
+        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"))
+        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"))
+        conn.commit()
+        logger.info("Added new columns to hotels table")
+
 except Exception as e:
     logger.error(f"Error creating database tables: {e}")
 
