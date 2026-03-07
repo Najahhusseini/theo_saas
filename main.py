@@ -505,6 +505,49 @@ def login(
     except Exception as e:
         logger.error(f"❌ Login error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+    
+# -------------------------
+# GET BOOKING REQUESTS
+# -------------------------
+@app.get("/booking-requests")
+def get_booking_requests(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get all booking requests for the user's hotel"""
+    try:
+        logger.info(f"📋 Fetching booking requests for hotel {current_user.hotel_id}")
+        
+        # Get booking requests for the user's hotel
+        booking_requests = db.query(models.BookingRequest).filter(
+            models.BookingRequest.hotel_id == current_user.hotel_id
+        ).all()
+        
+        logger.info(f"✅ Found {len(booking_requests)} booking requests")
+        
+        # Return as list
+        return [
+            {
+                "id": req.id,
+                "hotel_id": req.hotel_id,
+                "guest_name": req.guest_name,
+                "email": req.email,
+                "room_type": req.room_type,
+                "arrival_date": str(req.arrival_date),
+                "departure_date": str(req.departure_date),
+                "number_of_rooms": req.number_of_rooms,
+                "number_of_guests": req.number_of_guests,
+                "special_requests": req.special_requests,
+                "status": req.status,
+                "draft_reply": req.draft_reply,
+                "created_at": str(req.created_at) if req.created_at else None
+            }
+            for req in booking_requests
+        ]
+        
+    except Exception as e:
+        logger.error(f"❌ Error fetching booking requests: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------------
 # PROTECTED TEST ENDPOINTS
