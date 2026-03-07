@@ -2,6 +2,30 @@ from sqlalchemy import Column, Integer, String, Date, ForeignKey, Text, TIMESTAM
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime
+from pydantic import BaseModel
+from typing import Optional
+
+class HotelCreate(BaseModel):
+    name: str
+    subscription_plan: str
+    address: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+class HotelResponse(BaseModel):
+    id: int
+    name: str
+    subscription_plan: str
+    address: Optional[str] = None
+    city: Optional[str] = None
+    country: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
 
 class Hotel(Base):
     __tablename__ = "hotels"
