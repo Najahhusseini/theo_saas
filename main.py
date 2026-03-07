@@ -75,6 +75,9 @@ try:
         conn.commit()
         logger.info("Added new columns to hotels table")
 
+        models.Base.metadata.create_all(bind=engine)
+    logger.info("Database tables created successfully")
+
 except Exception as e:
     logger.error(f"Error creating database tables: {e}")
 
@@ -798,6 +801,30 @@ async def startup_event():
             logger.info(f"  {route.methods} {route.path}")
     
     logger.info("="*50)
+
+
+# -------------------------
+# ADMIN: CLEAR DATABASE (TEMPORARY)
+# -------------------------
+from sqlalchemy import text
+
+@app.delete("/admin/clear-database")
+def clear_database(db: Session = Depends(get_db)):
+    """Clear all data from database (admin only)"""
+    try:
+        # Delete in correct order to avoid foreign key issues
+        db.execute(text("DELETE FROM modification_requests"))
+        db.execute(text("DELETE FROM confirmed_bookings"))
+        db.execute(text("DELETE FROM booking_requests"))
+        db.execute(text("DELETE FROM room_types"))
+        db.execute(text("DELETE FROM users"))
+        db.execute(text("DELETE FROM hotels"))
+        db.commit()
+        
+        return {"message": "✅ Database cleared successfully"}
+    except Exception as e:
+        db.rollback()
+        return {"error": str(e)}
 
 # -------------------------
 # SHUTDOWN EVENT
