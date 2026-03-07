@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, Text, TIMESTAMP, Boolean
+from sqlalchemy import Column, Integer, String, Date, ForeignKey, Text, TIMESTAMP, Boolean, DateTime
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime
@@ -9,6 +9,15 @@ class Hotel(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     subscription_plan = Column(String)
+
+    address = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    country = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    email = Column(String, nullable=True, unique=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     users = relationship("User", back_populates="hotel")
     room_types = relationship("RoomType", back_populates="hotel")
