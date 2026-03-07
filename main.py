@@ -96,6 +96,31 @@ app.include_router(confirmed_router)
 app.include_router(telegram_router)
 app.include_router(modifications_router)
 
+
+# Add this after your CORS middleware
+@app.options("/hotels/")
+async def hotels_options():
+    """Handle OPTIONS requests for CORS preflight"""
+    return JSONResponse(
+        content={"message": "OK"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+    )
+
+@app.options("/users/")
+async def users_options():
+    """Handle OPTIONS requests for CORS preflight"""
+    return JSONResponse(
+        content={"message": "OK"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+    )
 # -------------------------
 # MIDDLEWARE
 # -------------------------
@@ -298,7 +323,7 @@ def test_telegram_connection():
 # -------------------------
 # CREATE HOTEL
 # -------------------------
-@app.post("/hotels/")
+@app.post("/hotels/", response_model=HotelCreate)
 def create_hotel(
     hotel: HotelCreate,
     db: Session = Depends(get_db)
@@ -327,7 +352,18 @@ def create_hotel(
         db.refresh(new_hotel)
         
         logger.info(f"✅ Created hotel: {hotel.name} (ID: {new_hotel.id})")
-        return new_hotel
+        
+        # Return the created hotel
+        return {
+            "id": new_hotel.id,
+            "name": new_hotel.name,
+            "subscription_plan": new_hotel.subscription_plan,
+            "address": new_hotel.address,
+            "city": new_hotel.city,
+            "country": new_hotel.country,
+            "phone": new_hotel.phone,
+            "email": new_hotel.email
+        }
         
     except HTTPException:
         raise
