@@ -60,6 +60,8 @@ logger.info("===================================")
 try:
     models.Base.metadata.create_all(bind=engine)
     logger.info("Database tables created successfully")
+
+    models.Base.metadata.create_all(bind=engine)
 except Exception as e:
     logger.error(f"Error creating database tables: {e}")
 
