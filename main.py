@@ -540,6 +540,7 @@ def get_booking_requests(
                 "special_requests": req.special_requests,
                 "status": req.status,
                 "draft_reply": req.draft_reply,
+                "raw_email": req.raw_email, 
                 "created_at": str(req.created_at) if req.created_at else None
             }
             for req in booking_requests
