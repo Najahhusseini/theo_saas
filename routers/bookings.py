@@ -208,6 +208,16 @@ def manager_decision(
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     
+@router.get("/debug-decision/{decision}")
+def debug_decision(decision: str):
+    """Test endpoint to verify decision handling"""
+    return {
+        "received": decision,
+        "lowercase": decision.lower(),
+        "is_rejected": decision.lower() in ["reject", "rejected"],
+        "is_confirmed": decision.lower() in ["confirm", "confirmed"]
+    }
+    
 @router.get("/debug-endpoint")
 def debug_endpoint():
     """Debug endpoint to see what code is running"""
