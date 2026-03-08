@@ -28,6 +28,13 @@ def manager_decision(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
+    logger.info("="*50)
+    logger.info(f"📥 DECISION ENDPOINT CALLED")
+    logger.info(f"  - Request ID: {request_id}")
+    logger.info(f"  - Decision received: '{decision}'")
+    logger.info(f"  - Draft reply length: {len(draft_reply) if draft_reply else 0}")
+    logger.info(f"  - Current user: {current_user.email}")
+
     try:
         booking = db.query(models.BookingRequest).filter(
             models.BookingRequest.id == request_id,
@@ -254,6 +261,8 @@ def edit_draft(
         "message": "Draft updated successfully",
         "draft": booking.ai_draft_email
     }
+
+
 @router.post("/{booking_id}/generate-draft")
 def generate_draft(
     booking_id: int,
@@ -283,7 +292,8 @@ def generate_draft(
     except Exception as e:
         logger.error(f"Error generating draft: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-    
+
+
 @router.post("/{booking_id}/generate-rejection-draft")
 def generate_rejection_draft(
     booking_id: int,
@@ -309,6 +319,7 @@ def generate_rejection_draft(
     except Exception as e:
         logger.error(f"Error generating rejection draft: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/{booking_id}/generate-waitlist-draft")
 def generate_waitlist_draft(
