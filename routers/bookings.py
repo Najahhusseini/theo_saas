@@ -30,60 +30,73 @@ def manager_decision(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    
     logger.info("="*60)
-    logger.info(f"📥 DECISION ENDPOINT CALLED")
-    logger.info(f"  - Request ID: {request_id}")
-    logger.info(f"  - Decision received: '{decision}'")
-    logger.info(f"  - Decision type: {type(decision)}")
-    logger.info(f"  - Draft reply length: {len(draft_reply) if draft_reply else 0}")
-    logger.info(f"  - Current user: {current_user.email}")
+    logger.info("🔍🔍🔍 STARTING DECISION FUNCTION 🔍🔍🔍")
+    logger.info(f"STEP 1: Function entered with request_id={request_id}")
+    logger.info(f"STEP 2: Raw decision value: '{decision}'")
+    logger.info(f"STEP 3: Draft reply present: {bool(draft_reply)}")
+    logger.info(f"STEP 4: Current user: {current_user.email}")
 
     try:
+        # STEP 5: Query booking
+        logger.info(f"STEP 5: Querying booking with id={request_id}")
         booking = db.query(models.BookingRequest).filter(
             models.BookingRequest.id == request_id,
             models.BookingRequest.hotel_id == current_user.hotel_id
         ).first()
 
         if not booking:
+            logger.error(f"STEP 5a: Booking {request_id} not found!")
             raise HTTPException(status_code=404, detail="Booking not found")
+        
+        logger.info(f"STEP 5b: Found booking for guest: {booking.guest_name}")
 
-        # Clean and normalize the decision
+        # STEP 6: Clean decision
         decision_clean = decision.strip().lower()
-        logger.info(f"  - Cleaned decision: '{decision_clean}'")
+        logger.info(f"STEP 6: Cleaned decision: '{decision_clean}'")
 
-        # Map to final decision and status
+        # STEP 7: Decision mapping
+        logger.info("STEP 7: Starting decision mapping...")
         if decision_clean in ["confirm", "confirmed"]:
             final_decision = "confirmed"
             status_text = "Confirmed"
+            logger.info(f"STEP 7a: Mapped to CONFIRMED")
         elif decision_clean in ["reject", "rejected"]:
             final_decision = "rejected"
             status_text = "Rejected"
-        elif decision_clean in ["waitlist", "waitlist"]:
+            logger.info(f"STEP 7a: Mapped to REJECTED")
+        elif decision_clean in ["waitlist"]:
             final_decision = "waitlist"
             status_text = "Waitlist"
+            logger.info(f"STEP 7a: Mapped to WAITLIST")
         else:
-            logger.error(f"❌ Invalid decision value: '{decision}'")
+            logger.error(f"STEP 7a: Invalid decision: '{decision}'")
             raise HTTPException(status_code=400, detail=f"Invalid decision: {decision}")
 
-        logger.info(f"  - Final decision: '{final_decision}' -> Status: '{status_text}'")
+        logger.info(f"STEP 7b: Final decision: '{final_decision}' -> Status: '{status_text}'")
 
-        # Update booking status
+        # STEP 8: Update booking
+        logger.info(f"STEP 8: Updating booking status to {status_text}")
         booking.status = status_text
 
-        # Use provided draft or generate one
+        # STEP 9: Handle draft
+        logger.info(f"STEP 9: Processing draft reply")
         if draft_reply:
+            logger.info(f"STEP 9a: Using provided draft (length: {len(draft_reply)})")
             booking.ai_draft_email = draft_reply
         else:
+            logger.info(f"STEP 9b: Generating AI draft")
             booking.ai_draft_email = generate_reply_draft(booking, status_text)
 
-        # Create confirmed booking if needed
+        # STEP 10: Create confirmed booking if needed
         if final_decision == "confirmed":
+            logger.info(f"STEP 10: Confirmed decision - checking for existing confirmed booking")
             existing = db.query(models.ConfirmedBooking).filter(
                 models.ConfirmedBooking.booking_request_id == booking.id
             ).first()
 
             if not existing:
+                logger.info(f"STEP 10a: Creating new confirmed booking")
                 confirmed = models.ConfirmedBooking(
                     booking_request_id=booking.id,
                     hotel_id=current_user.hotel_id,
@@ -98,12 +111,21 @@ def manager_decision(
                     ai_draft_email=booking.ai_draft_email
                 )
                 db.add(confirmed)
+            else:
+                logger.info(f"STEP 10b: Confirmed booking already exists")
+        else:
+            logger.info(f"STEP 10: Not a confirmed decision, skipping confirmed booking creation")
 
+        # STEP 11: Commit to database
+        logger.info(f"STEP 11: Committing to database")
         db.commit()
         db.refresh(booking)
+        logger.info(f"STEP 11a: Commit successful")
 
-        # Send Telegram notification
+        # STEP 12: Send Telegram notification
+        logger.info(f"STEP 12: Checking Telegram config")
         if TELEGRAM_BOT_TOKEN and MANAGER_CHAT_ID:
+            logger.info(f"STEP 12a: Telegram configured, sending notification")
             try:
                 # Prepare emoji based on decision
                 emoji_map = {
@@ -112,11 +134,12 @@ def manager_decision(
                     "waitlist": "⏳"
                 }
                 emoji = emoji_map.get(final_decision, "🔄")
+                logger.info(f"STEP 12b: Using emoji: {emoji}")
 
                 # Get admin name
                 admin_name = current_user.name if hasattr(current_user, 'name') and current_user.name else current_user.email
 
-                # Format dates nicely
+                # Format dates
                 arrival = booking.arrival_date.strftime("%d %b %Y") if hasattr(booking.arrival_date, 'strftime') else str(booking.arrival_date)
                 departure = booking.departure_date.strftime("%d %b %Y") if hasattr(booking.departure_date, 'strftime') else str(booking.departure_date)
 
@@ -142,7 +165,7 @@ def manager_decision(
                 else:
                     message += f"\n*No email drafted.*\n"
 
-                # Send to Telegram with Edit/Send buttons
+                # Send to Telegram
                 url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
                 payload = {
                     "chat_id": MANAGER_CHAT_ID,
@@ -158,26 +181,30 @@ def manager_decision(
                     }
                 }
 
+                logger.info(f"STEP 12c: Sending Telegram message")
                 response = requests.post(url, json=payload, timeout=5)
                 if response.status_code == 200:
-                    logger.info(f"✅ Telegram notification sent for booking #{booking.id}")
+                    logger.info(f"STEP 12d: ✅ Telegram notification sent")
                 else:
-                    logger.error(f"❌ Telegram notification failed: {response.text}")
+                    logger.error(f"STEP 12d: ❌ Telegram failed: {response.text}")
 
             except Exception as e:
-                logger.error(f"❌ Failed to send Telegram notification: {e}")
+                logger.error(f"STEP 12e: ❌ Telegram error: {e}")
+        else:
+            logger.warning(f"STEP 12a: Telegram not configured - missing tokens")
 
-        logger.info(f"✅ Returning success for booking #{booking.id} with status {status_text}")
-
+        logger.info(f"✅ STEP 13: Function completed successfully")
+        
         return {
             "message": f"Booking {status_text} successfully",
             "draft": booking.ai_draft_email
         }
 
     except HTTPException:
+        logger.error(f"❌ HTTPException raised")
         raise
     except Exception as e:
-        logger.error(f"❌ Error in make_decision: {e}")
+        logger.error(f"❌ STEP ERROR: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     
