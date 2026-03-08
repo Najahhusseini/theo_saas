@@ -30,12 +30,7 @@ def manager_decision(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-     # SUPER SIMPLE TEST - RETURN IMMEDIATELY
-    return {
-        "message": f"TEST - You sent: '{decision}'",
-        "draft": draft_reply,
-        "debug": "This is a test response"
-    }
+    
     logger.info("="*60)
     logger.info(f"📥 DECISION ENDPOINT CALLED")
     logger.info(f"  - Request ID: {request_id}")
