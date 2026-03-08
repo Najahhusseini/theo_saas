@@ -320,6 +320,16 @@ def generate_rejection_draft(
     except Exception as e:
         logger.error(f"Error generating rejection draft: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+    
+@router.get("/test-version")
+def test_version():
+    """Test endpoint to verify the file version"""
+    return {
+        "status": "This is the FIXED version with correct decision mapping",
+        "version": "2.0.1",
+        "date": "2026-03-08"
+    }
 
 
 @router.post("/{booking_id}/generate-waitlist-draft")
@@ -343,6 +353,7 @@ def generate_waitlist_draft(
         draft = generate_reply_draft(booking, "Waitlist")
 
         return {"draft": draft}
+
 
     except Exception as e:
         logger.error(f"Error generating waitlist draft: {e}")
