@@ -217,6 +217,16 @@ def debug_decision(decision: str):
         "is_rejected": decision.lower() in ["reject", "rejected"],
         "is_confirmed": decision.lower() in ["confirm", "confirmed"]
     }
+
+@router.get("/debug-decision-endpoint")
+def debug_decision_endpoint():
+    """Return the actual source code of the decision endpoint"""
+    import inspect
+    from routers.bookings import manager_decision
+    source = inspect.getsource(manager_decision)
+    return {
+        "source": source[:1000] + "..."  # First 1000 chars
+    }
     
 @router.get("/debug-endpoint")
 def debug_endpoint():
