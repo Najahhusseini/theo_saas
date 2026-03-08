@@ -185,6 +185,23 @@ def manager_decision(
         logger.error(f"❌ Error in make_decision: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/debug-endpoint")
+def debug_endpoint():
+    """Debug endpoint to see what code is running"""
+    import inspect
+    import os
+    
+    # Get the source code of the manager_decision function
+    from routers.bookings import manager_decision
+    source = inspect.getsource(manager_decision)
+    
+    return {
+        "message": "Debug info",
+        "file_path": __file__,
+        "function_source": source[:500] + "...",  # First 500 chars
+        "environment": dict(os.environ),
+    }
 
 
 @router.post("/create", response_model=BookingResponse)
