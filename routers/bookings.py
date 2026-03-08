@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import models
@@ -13,6 +13,7 @@ from services.ai_drafts import generate_reply_draft
 from models import BookingRequest, ConfirmedBooking
 import logging
 import requests
+import json
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/booking-requests", tags=["Booking Requests"])
@@ -23,19 +24,34 @@ MANAGER_CHAT_ID = os.getenv("MANAGER_CHAT_ID")
 
 
 @router.patch("/{request_id}/decision")
-def manager_decision(
+async def manager_decision(
+    request: Request,
     request_id: int = Path(...),
-    decision: str = "Confirm",
-    draft_reply: str = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
     logger.info("="*60)
     logger.info("🔍🔍🔍 STARTING DECISION FUNCTION 🔍🔍🔍")
     logger.info(f"STEP 1: Function entered with request_id={request_id}")
-    logger.info(f"STEP 2: Raw decision value: '{decision}'")
-    logger.info(f"STEP 3: Draft reply present: {bool(draft_reply)}")
-    logger.info(f"STEP 4: Current user: {current_user.email}")
+    logger.info(f"STEP 2: Current user: {current_user.email}")
+    
+    # Parse request body manually to ensure we get the decision
+    try:
+        body = await request.json()
+        logger.info(f"STEP 2a: Raw request body: {body}")
+        
+        decision = body.get("decision")
+        draft_reply = body.get("draft_reply")
+        
+        logger.info(f"STEP 2b: Extracted decision: '{decision}', draft_reply present: {bool(draft_reply)}")
+        
+        if decision is None:
+            logger.error("STEP 2c: No decision provided in request body")
+            raise HTTPException(status_code=400, detail="Decision is required")
+            
+    except Exception as e:
+        logger.error(f"STEP 2d: Failed to parse request body: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid request body: {str(e)}")
 
     try:
         # STEP 5: Query booking
@@ -207,6 +223,9 @@ def manager_decision(
         logger.error(f"❌ STEP ERROR: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ... (rest of your endpoints remain exactly the same)
     
 @router.get("/debug-decision/{decision}")
 def debug_decision(decision: str):
