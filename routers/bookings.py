@@ -283,3 +283,55 @@ def generate_draft(
     except Exception as e:
         logger.error(f"Error generating draft: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+@router.post("/{booking_id}/generate-rejection-draft")
+def generate_rejection_draft(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Generate an AI rejection draft for a booking"""
+    try:
+        booking = db.query(models.BookingRequest).filter(
+            models.BookingRequest.id == booking_id,
+            models.BookingRequest.hotel_id == current_user.hotel_id
+        ).first()
+        
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        from services.ai_drafts import generate_reply_draft
+        # Generate rejection-specific draft
+        draft = generate_reply_draft(booking, "Reject")
+        
+        return {"draft": draft}
+        
+    except Exception as e:
+        logger.error(f"Error generating rejection draft: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{booking_id}/generate-waitlist-draft")
+def generate_waitlist_draft(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Generate an AI waitlist draft for a booking"""
+    try:
+        booking = db.query(models.BookingRequest).filter(
+            models.BookingRequest.id == booking_id,
+            models.BookingRequest.hotel_id == current_user.hotel_id
+        ).first()
+        
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        from services.ai_drafts import generate_reply_draft
+        # Generate waitlist-specific draft
+        draft = generate_reply_draft(booking, "Waitlist")
+        
+        return {"draft": draft}
+        
+    except Exception as e:
+        logger.error(f"Error generating waitlist draft: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
