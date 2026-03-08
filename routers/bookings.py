@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 import models
@@ -8,80 +8,167 @@ from database import get_db
 from auth import get_current_user
 from schemas import BookingCreate, BookingResponse
 from services.availability import check_room_availability
-from fastapi import Path
 from services.telegram import send_telegram_message
 from services.ai_drafts import generate_reply_draft
 from models import BookingRequest, ConfirmedBooking
-from fastapi import HTTPException
+import logging
+
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/booking-requests", tags=["Booking Requests"])
 
+# Get Telegram config
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+MANAGER_CHAT_ID = os.getenv("MANAGER_CHAT_ID")
 
 @router.patch("/{request_id}/decision")
 def manager_decision(
     request_id: int = Path(...),
     decision: str = "Confirm",  # Confirm / Reject / Waitlist
+    draft_reply: str = None,  # Add this parameter to receive the draft from frontend
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-
-    booking = db.query(models.BookingRequest).filter(
-        models.BookingRequest.id == request_id,
-        models.BookingRequest.hotel_id == current_user.hotel_id
-    ).first()
-
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
-
-    booking.status = decision
-
-    # 🔥 Generate AI draft reply
-    draft = generate_reply_draft(booking, decision)
-
-    # 🔥 Save draft inside booking
-    booking.ai_draft_email = draft
-
-    # If Confirm → create ConfirmedBooking
-    if decision == "Confirm":
-
-        existing = db.query(models.ConfirmedBooking).filter(
-            models.ConfirmedBooking.booking_request_id == booking.id
+    try:
+        booking = db.query(models.BookingRequest).filter(
+            models.BookingRequest.id == request_id,
+            models.BookingRequest.hotel_id == current_user.hotel_id
         ).first()
 
-        if existing:
-            return {"message": "Booking already confirmed"}
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
 
-        confirmed = models.ConfirmedBooking(
-            booking_request_id=booking.id,
-            hotel_id=current_user.hotel_id,
-            arrival_date=booking.arrival_date,
-            departure_date=booking.departure_date,
-            room_type=booking.room_type,
-            number_of_rooms=booking.number_of_rooms
-        )
-
-        db.add(confirmed)
-
-    db.commit()
-    db.refresh(booking)
-
-    # 🔥 Send draft to Telegram WITH buttons
-    send_telegram_message(
-        chat_id=os.getenv("MANAGER_CHAT_ID"),
-        message=(
-            f"📧 Draft Reply:\n\n{booking.ai_draft_email}\n\n"
-            "Choose next action:"
-        ),
-        reply_markup={
-            "inline_keyboard": [
-                [
-                    {"text": "✏️ Edit Draft", "callback_data": f"edit_{booking.id}"},
-                    {"text": "📤 Send Email", "callback_data": f"send_{booking.id}"}
-                ]
-            ]
+        # Map decision to status
+        status_map = {
+            "confirmed": "Confirmed",
+            "rejected": "Rejected",
+            "waitlist": "Waitlist"
         }
-    )
+        
+        # Handle both incoming formats (Confirm/confirmed etc)
+        decision_lower = decision.lower()
+        if decision_lower not in status_map:
+            # Try to map old format
+            if decision == "Confirm":
+                decision_lower = "confirmed"
+            elif decision == "Reject":
+                decision_lower = "rejected"
+            elif decision == "Waitlist":
+                decision_lower = "waitlist"
+            else:
+                raise HTTPException(status_code=400, detail="Invalid decision")
+        
+        new_status = status_map[decision_lower]
+        booking.status = new_status
 
-    return {"message": "Decision saved and draft sent to Telegram"}
+        # 🔥 Use provided draft or generate one
+        if draft_reply:
+            booking.ai_draft_email = draft_reply
+        else:
+            # Generate AI draft reply
+            booking.ai_draft_email = generate_reply_draft(booking, new_status)
+
+        # If Confirm → create ConfirmedBooking
+        if decision_lower == "confirmed":
+            existing = db.query(models.ConfirmedBooking).filter(
+                models.ConfirmedBooking.booking_request_id == booking.id
+            ).first()
+
+            if not existing:
+                confirmed = models.ConfirmedBooking(
+                    booking_request_id=booking.id,
+                    hotel_id=current_user.hotel_id,
+                    guest_name=booking.guest_name,
+                    email=booking.email,
+                    arrival_date=booking.arrival_date,
+                    departure_date=booking.departure_date,
+                    room_type=booking.room_type,
+                    number_of_rooms=booking.number_of_rooms,
+                    number_of_guests=booking.number_of_guests,
+                    special_requests=booking.special_requests,
+                    ai_draft_email=booking.ai_draft_email
+                )
+                db.add(confirmed)
+
+        db.commit()
+        db.refresh(booking)
+
+        # 🔥 Send detailed Telegram notification to managers
+        if TELEGRAM_BOT_TOKEN and MANAGER_CHAT_ID:
+            try:
+                # Prepare emoji based on decision
+                emoji_map = {
+                    "confirmed": "✅",
+                    "rejected": "❌",
+                    "waitlist": "⏳"
+                }
+                emoji = emoji_map.get(decision_lower, "🔄")
+                
+                # Get admin name
+                admin_name = current_user.name if hasattr(current_user, 'name') and current_user.name else current_user.email
+                
+                # Format dates nicely
+                arrival = booking.arrival_date.strftime("%d %b %Y") if hasattr(booking.arrival_date, 'strftime') else str(booking.arrival_date)
+                departure = booking.departure_date.strftime("%d %b %Y") if hasattr(booking.departure_date, 'strftime') else str(booking.departure_date)
+                
+                # Build message
+                message = (
+                    f"{emoji} *Booking #{booking.id} {new_status}*\n"
+                    f"━━━━━━━━━━━━━━━━━━━\n"
+                    f"👤 *Guest:* {booking.guest_name}\n"
+                    f"📧 *Guest Email:* {booking.email}\n"
+                    f"📅 *Stay:* {arrival} → {departure}\n"
+                    f"🛏 *Room:* {booking.room_type} ({booking.number_of_rooms} room{'s' if booking.number_of_rooms > 1 else ''})\n"
+                    f"👥 *Guests:* {booking.number_of_guests}\n"
+                )
+                
+                if booking.special_requests:
+                    message += f"📝 *Requests:* {booking.special_requests}\n"
+                
+                message += f"━━━━━━━━━━━━━━━━━━━\n"
+                message += f"👨‍💼 *Action by:* {admin_name}\n"
+                
+                if booking.ai_draft_email:
+                    message += f"\n📨 *Final Email Sent:*\n```\n{booking.ai_draft_email}\n```\n"
+                else:
+                    message += f"\n*No email drafted.*\n"
+
+                # Send to Telegram with Edit/Send buttons
+                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                payload = {
+                    "chat_id": MANAGER_CHAT_ID,
+                    "text": message,
+                    "parse_mode": "Markdown",
+                    "reply_markup": {
+                        "inline_keyboard": [
+                            [
+                                {"text": "✏️ Edit Draft", "callback_data": f"edit_{booking.id}"},
+                                {"text": "📤 Send Email", "callback_data": f"send_{booking.id}"}
+                            ]
+                        ]
+                    }
+                }
+                
+                import requests
+                response = requests.post(url, json=payload, timeout=5)
+                if response.status_code == 200:
+                    logger.info(f"✅ Telegram notification sent for booking #{booking.id}")
+                else:
+                    logger.error(f"❌ Telegram notification failed: {response.text}")
+                    
+            except Exception as e:
+                logger.error(f"❌ Failed to send Telegram notification: {e}")
+
+        return {
+            "message": f"Booking {new_status} successfully",
+            "draft": booking.ai_draft_email
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in make_decision: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/create", response_model=BookingResponse)
@@ -95,10 +182,10 @@ def create_booking_request(
     available, message = check_room_availability(
         db=db,
         hotel_id=current_user.hotel_id,
-        room_type_name=booking.room_type,  # ✅ correct param name
+        room_type_name=booking.room_type,
         arrival_date=booking.arrival_date,
         departure_date=booking.departure_date,
-        requested_rooms=booking.number_of_rooms  # ✅ correct param name
+        requested_rooms=booking.number_of_rooms
     )
 
     status = "Pending"
@@ -136,23 +223,34 @@ def create_booking_request(
             status_code=400,
             detail="Error creating booking request."
         )
-    @router.get("/confirmed-bookings")
-    def get_confirmed_bookings(db: Session = Depends(get_db)):
-       return db.query(ConfirmedBooking).all()
+
+
+@router.get("/confirmed-bookings")
+def get_confirmed_bookings(db: Session = Depends(get_db)):
+    return db.query(ConfirmedBooking).all()
+
+
+@router.put("/{booking_id}/edit-draft")
+def edit_draft(
+    booking_id: int, 
+    draft_reply: str, 
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
     
-@router.put("/booking-requests/{booking_id}/edit-draft")
-def edit_draft(booking_id: int, new_draft: str, db: Session = Depends(get_db)):
-    
-    booking = db.query(BookingRequest).filter(BookingRequest.id == booking_id).first()
+    booking = db.query(BookingRequest).filter(
+        BookingRequest.id == booking_id,
+        BookingRequest.hotel_id == current_user.hotel_id
+    ).first()
 
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
 
-    booking.ai_draft_email = new_draft
+    booking.ai_draft_email = draft_reply
     db.commit()
     db.refresh(booking)
 
     return {
         "message": "Draft updated successfully",
-        "updated_draft": booking.ai_draft_email
+        "draft": booking.ai_draft_email
     }
