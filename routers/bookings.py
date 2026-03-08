@@ -254,3 +254,32 @@ def edit_draft(
         "message": "Draft updated successfully",
         "draft": booking.ai_draft_email
     }
+@router.post("/{booking_id}/generate-draft")
+def generate_draft(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Generate an AI draft reply for a booking"""
+    try:
+        booking = db.query(models.BookingRequest).filter(
+            models.BookingRequest.id == booking_id,
+            models.BookingRequest.hotel_id == current_user.hotel_id
+        ).first()
+        
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found")
+        
+        # Generate draft using your existing AI function
+        from services.ai_drafts import generate_reply_draft
+        draft = generate_reply_draft(booking, "Confirm")
+        
+        # Optionally save it
+        booking.ai_draft_email = draft
+        db.commit()
+        
+        return {"draft": draft}
+        
+    except Exception as e:
+        logger.error(f"Error generating draft: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
