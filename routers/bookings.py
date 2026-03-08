@@ -32,6 +32,7 @@ def manager_decision(
     logger.info(f"📥 DECISION ENDPOINT CALLED")
     logger.info(f"  - Request ID: {request_id}")
     logger.info(f"  - Decision received: '{decision}'")
+    logger.info(f"  - Decision type: {type(decision)}")
     logger.info(f"  - Draft reply length: {len(draft_reply) if draft_reply else 0}")
     logger.info(f"  - Current user: {current_user.email}")
 
@@ -53,8 +54,12 @@ def manager_decision(
         
         # Handle both incoming formats (Confirm/confirmed etc)
         decision_lower = decision.lower()
+        logger.info(f"  - Lowercase decision: '{decision_lower}'")
+        logger.info(f"  - Is in status_map? {decision_lower in status_map}")
+        
         if decision_lower not in status_map:
             # Try to map old format
+            logger.info(f"  - Trying old format mapping")
             if decision == "Confirm":
                 decision_lower = "confirmed"
             elif decision == "Reject":
@@ -62,9 +67,12 @@ def manager_decision(
             elif decision == "Waitlist":
                 decision_lower = "waitlist"
             else:
-                raise HTTPException(status_code=400, detail="Invalid decision")
+                logger.error(f"  - Invalid decision: '{decision}'")
+                raise HTTPException(status_code=400, detail=f"Invalid decision: {decision}")
         
         new_status = status_map[decision_lower]
+        logger.info(f"  - Mapped to status: '{new_status}'")
+        
         booking.status = new_status
 
         # 🔥 Use provided draft or generate one
@@ -98,6 +106,20 @@ def manager_decision(
 
         db.commit()
         db.refresh(booking)
+
+        # ... rest of your Telegram notification code ...
+
+        return {
+            "message": f"Booking {new_status} successfully",
+            "draft": booking.ai_draft_email
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in make_decision: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
         # 🔥 Send detailed Telegram notification to managers
         if TELEGRAM_BOT_TOKEN and MANAGER_CHAT_ID:
