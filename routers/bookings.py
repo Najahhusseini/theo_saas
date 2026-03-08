@@ -12,6 +12,7 @@ from services.telegram import send_telegram_message
 from services.ai_drafts import generate_reply_draft
 from models import BookingRequest, ConfirmedBooking
 import logging
+import requests
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/booking-requests", tags=["Booking Requests"])
@@ -20,15 +21,16 @@ router = APIRouter(prefix="/booking-requests", tags=["Booking Requests"])
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 MANAGER_CHAT_ID = os.getenv("MANAGER_CHAT_ID")
 
+
 @router.patch("/{request_id}/decision")
 def manager_decision(
     request_id: int = Path(...),
-    decision: str = "Confirm",  # Confirm / Reject / Waitlist
-    draft_reply: str = None,  # Add this parameter to receive the draft from frontend
+    decision: str = "Confirm",
+    draft_reply: str = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    logger.info("="*50)
+    logger.info("="*60)
     logger.info(f"📥 DECISION ENDPOINT CALLED")
     logger.info(f"  - Request ID: {request_id}")
     logger.info(f"  - Decision received: '{decision}'")
@@ -45,45 +47,37 @@ def manager_decision(
         if not booking:
             raise HTTPException(status_code=404, detail="Booking not found")
 
-        # Map decision to status
-        status_map = {
-            "confirmed": "Confirmed",
-            "rejected": "Rejected",
-            "waitlist": "Waitlist"
-        }
-        
-        # Handle both incoming formats (Confirm/confirmed etc)
-        decision_lower = decision.lower()
-        logger.info(f"  - Lowercase decision: '{decision_lower}'")
-        logger.info(f"  - Is in status_map? {decision_lower in status_map}")
-        
-        if decision_lower not in status_map:
-            # Try to map old format
-            logger.info(f"  - Trying old format mapping")
-            if decision == "Confirm":
-                decision_lower = "confirmed"
-            elif decision == "Reject":
-                decision_lower = "rejected"
-            elif decision == "Waitlist":
-                decision_lower = "waitlist"
-            else:
-                logger.error(f"  - Invalid decision: '{decision}'")
-                raise HTTPException(status_code=400, detail=f"Invalid decision: {decision}")
-        
-        new_status = status_map[decision_lower]
-        logger.info(f"  - Mapped to status: '{new_status}'")
-        
-        booking.status = new_status
+        # Clean and normalize the decision
+        decision_clean = decision.strip().lower()
+        logger.info(f"  - Cleaned decision: '{decision_clean}'")
 
-        # 🔥 Use provided draft or generate one
+        # Map to final decision and status
+        if decision_clean in ["confirm", "confirmed"]:
+            final_decision = "confirmed"
+            status_text = "Confirmed"
+        elif decision_clean in ["reject", "rejected"]:
+            final_decision = "rejected"
+            status_text = "Rejected"
+        elif decision_clean in ["waitlist", "waitlist"]:
+            final_decision = "waitlist"
+            status_text = "Waitlist"
+        else:
+            logger.error(f"❌ Invalid decision value: '{decision}'")
+            raise HTTPException(status_code=400, detail=f"Invalid decision: {decision}")
+
+        logger.info(f"  - Final decision: '{final_decision}' -> Status: '{status_text}'")
+
+        # Update booking status
+        booking.status = status_text
+
+        # Use provided draft or generate one
         if draft_reply:
             booking.ai_draft_email = draft_reply
         else:
-            # Generate AI draft reply
-            booking.ai_draft_email = generate_reply_draft(booking, new_status)
+            booking.ai_draft_email = generate_reply_draft(booking, status_text)
 
-        # If Confirm → create ConfirmedBooking
-        if decision_lower == "confirmed":
+        # Create confirmed booking if needed
+        if final_decision == "confirmed":
             existing = db.query(models.ConfirmedBooking).filter(
                 models.ConfirmedBooking.booking_request_id == booking.id
             ).first()
@@ -107,21 +101,7 @@ def manager_decision(
         db.commit()
         db.refresh(booking)
 
-        # ... rest of your Telegram notification code ...
-
-        return {
-            "message": f"Booking {new_status} successfully",
-            "draft": booking.ai_draft_email
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error in make_decision: {e}")
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-        # 🔥 Send detailed Telegram notification to managers
+        # Send Telegram notification
         if TELEGRAM_BOT_TOKEN and MANAGER_CHAT_ID:
             try:
                 # Prepare emoji based on decision
@@ -130,18 +110,18 @@ def manager_decision(
                     "rejected": "❌",
                     "waitlist": "⏳"
                 }
-                emoji = emoji_map.get(decision_lower, "🔄")
-                
+                emoji = emoji_map.get(final_decision, "🔄")
+
                 # Get admin name
                 admin_name = current_user.name if hasattr(current_user, 'name') and current_user.name else current_user.email
-                
+
                 # Format dates nicely
                 arrival = booking.arrival_date.strftime("%d %b %Y") if hasattr(booking.arrival_date, 'strftime') else str(booking.arrival_date)
                 departure = booking.departure_date.strftime("%d %b %Y") if hasattr(booking.departure_date, 'strftime') else str(booking.departure_date)
-                
+
                 # Build message
                 message = (
-                    f"{emoji} *Booking #{booking.id} {new_status}*\n"
+                    f"{emoji} *Booking #{booking.id} {status_text}*\n"
                     f"━━━━━━━━━━━━━━━━━━━\n"
                     f"👤 *Guest:* {booking.guest_name}\n"
                     f"📧 *Guest Email:* {booking.email}\n"
@@ -149,13 +129,13 @@ def manager_decision(
                     f"🛏 *Room:* {booking.room_type} ({booking.number_of_rooms} room{'s' if booking.number_of_rooms > 1 else ''})\n"
                     f"👥 *Guests:* {booking.number_of_guests}\n"
                 )
-                
+
                 if booking.special_requests:
                     message += f"📝 *Requests:* {booking.special_requests}\n"
-                
+
                 message += f"━━━━━━━━━━━━━━━━━━━\n"
                 message += f"👨‍💼 *Action by:* {admin_name}\n"
-                
+
                 if booking.ai_draft_email:
                     message += f"\n📨 *Final Email Sent:*\n```\n{booking.ai_draft_email}\n```\n"
                 else:
@@ -176,26 +156,27 @@ def manager_decision(
                         ]
                     }
                 }
-                
-                import requests
+
                 response = requests.post(url, json=payload, timeout=5)
                 if response.status_code == 200:
                     logger.info(f"✅ Telegram notification sent for booking #{booking.id}")
                 else:
                     logger.error(f"❌ Telegram notification failed: {response.text}")
-                    
+
             except Exception as e:
                 logger.error(f"❌ Failed to send Telegram notification: {e}")
 
+        logger.info(f"✅ Returning success for booking #{booking.id} with status {status_text}")
+
         return {
-            "message": f"Booking {new_status} successfully",
+            "message": f"Booking {status_text} successfully",
             "draft": booking.ai_draft_email
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in make_decision: {e}")
+        logger.error(f"❌ Error in make_decision: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -206,7 +187,6 @@ def create_booking_request(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-
     # 🔍 Step 1: Check Availability
     available, message = check_room_availability(
         db=db,
@@ -261,12 +241,11 @@ def get_confirmed_bookings(db: Session = Depends(get_db)):
 
 @router.put("/{booking_id}/edit-draft")
 def edit_draft(
-    booking_id: int, 
-    draft_reply: str, 
+    booking_id: int,
+    draft_reply: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
-    
     booking = db.query(BookingRequest).filter(
         BookingRequest.id == booking_id,
         BookingRequest.hotel_id == current_user.hotel_id
@@ -297,20 +276,20 @@ def generate_draft(
             models.BookingRequest.id == booking_id,
             models.BookingRequest.hotel_id == current_user.hotel_id
         ).first()
-        
+
         if not booking:
             raise HTTPException(status_code=404, detail="Booking not found")
-        
+
         # Generate draft using your existing AI function
         from services.ai_drafts import generate_reply_draft
         draft = generate_reply_draft(booking, "Confirm")
-        
+
         # Optionally save it
         booking.ai_draft_email = draft
         db.commit()
-        
+
         return {"draft": draft}
-        
+
     except Exception as e:
         logger.error(f"Error generating draft: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -328,16 +307,16 @@ def generate_rejection_draft(
             models.BookingRequest.id == booking_id,
             models.BookingRequest.hotel_id == current_user.hotel_id
         ).first()
-        
+
         if not booking:
             raise HTTPException(status_code=404, detail="Booking not found")
-        
+
         from services.ai_drafts import generate_reply_draft
         # Generate rejection-specific draft
         draft = generate_reply_draft(booking, "Reject")
-        
+
         return {"draft": draft}
-        
+
     except Exception as e:
         logger.error(f"Error generating rejection draft: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -355,16 +334,16 @@ def generate_waitlist_draft(
             models.BookingRequest.id == booking_id,
             models.BookingRequest.hotel_id == current_user.hotel_id
         ).first()
-        
+
         if not booking:
             raise HTTPException(status_code=404, detail="Booking not found")
-        
+
         from services.ai_drafts import generate_reply_draft
         # Generate waitlist-specific draft
         draft = generate_reply_draft(booking, "Waitlist")
-        
+
         return {"draft": draft}
-        
+
     except Exception as e:
         logger.error(f"Error generating waitlist draft: {e}")
         raise HTTPException(status_code=500, detail=str(e))
