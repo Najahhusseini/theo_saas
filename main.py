@@ -62,7 +62,7 @@ try:
     logger.info("Database tables created successfully")
 
     # Add missing columns to hotels table
-    from sqlalchemy import text
+    from sqlalchemy import text, inspect
     with engine.connect() as conn:
         # Hotel columns (your existing code)
         conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS address VARCHAR"))
@@ -74,36 +74,40 @@ try:
         conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"))
         logger.info("✅ Added/verified columns in hotels table")
         
-        # Add missing columns to users table
-        try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR"))
-            logger.info("✅ Added/verified name column in users table")
-        except Exception as e:
-            logger.warning(f"Could not add name column: {e}")
-            
-        try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR"))
-            logger.info("✅ Added/verified phone column in users table")
-        except Exception as e:
-            logger.warning(f"Could not add phone column: {e}")
-            
-        try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true"))
-            logger.info("✅ Added/verified active column in users table")
-        except Exception as e:
-            logger.warning(f"Could not add active column: {e}")
-            
-        try:
-            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP"))
-            logger.info("✅ Added/verified last_login column in users table")
-        except Exception as e:
-            logger.warning(f"Could not add last_login column: {e}")
+        # ----- NEW DIAGNOSTIC CODE FOR USERS TABLE -----
+        # Get existing columns in users table
+        inspector = inspect(engine)
+        existing_columns = [col['name'] for col in inspector.get_columns('users')]
+        logger.info(f"🔍 Existing columns in users table: {existing_columns}")
+        
+        # Define columns to add with their types
+        columns_to_add = [
+            ('name', 'VARCHAR'),
+            ('phone', 'VARCHAR'),
+            ('active', 'BOOLEAN DEFAULT true'),
+            ('last_login', 'TIMESTAMP')
+        ]
+        
+        # Add missing columns one by one
+        for col_name, col_type in columns_to_add:
+            if col_name not in existing_columns:
+                try:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"))
+                    logger.info(f"✅ Added {col_name} column to users table")
+                except Exception as e:
+                    logger.error(f"❌ Failed to add {col_name}: {e}")
+            else:
+                logger.info(f"✅ {col_name} column already exists")
+        
+        # Also check hotels table columns for completeness
+        hotel_columns = [col['name'] for col in inspector.get_columns('hotels')]
+        logger.info(f"🔍 Existing columns in hotels table: {hotel_columns}")
         
         conn.commit()
-        logger.info("✅ All database migrations completed successfully")
+        logger.info("✅ Database migration check completed")
 
 except Exception as e:
-    logger.error(f"❌ Error updating database schema: {e}")
+    logger.error(f"❌ Error creating database tables: {e}")
 
 # -------------------------
 # FASTAPI APP
