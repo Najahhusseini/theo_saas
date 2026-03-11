@@ -61,10 +61,10 @@ try:
     models.Base.metadata.create_all(bind=engine)
     logger.info("Database tables created successfully")
 
-     # TEMPORARY: Add new columns if they don't exist
+    # Add missing columns to hotels table
     from sqlalchemy import text
     with engine.connect() as conn:
-        # Check if address column exists, if not add it
+        # Hotel columns (your existing code)
         conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS address VARCHAR"))
         conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS city VARCHAR"))
         conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS country VARCHAR"))
@@ -72,14 +72,38 @@ try:
         conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS email VARCHAR"))
         conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"))
         conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"))
+        logger.info("✅ Added/verified columns in hotels table")
+        
+        # Add missing columns to users table
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS name VARCHAR"))
+            logger.info("✅ Added/verified name column in users table")
+        except Exception as e:
+            logger.warning(f"Could not add name column: {e}")
+            
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR"))
+            logger.info("✅ Added/verified phone column in users table")
+        except Exception as e:
+            logger.warning(f"Could not add phone column: {e}")
+            
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true"))
+            logger.info("✅ Added/verified active column in users table")
+        except Exception as e:
+            logger.warning(f"Could not add active column: {e}")
+            
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP"))
+            logger.info("✅ Added/verified last_login column in users table")
+        except Exception as e:
+            logger.warning(f"Could not add last_login column: {e}")
+        
         conn.commit()
-        logger.info("Added new columns to hotels table")
-
-        models.Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created successfully")
+        logger.info("✅ All database migrations completed successfully")
 
 except Exception as e:
-    logger.error(f"Error creating database tables: {e}")
+    logger.error(f"❌ Error updating database schema: {e}")
 
 # -------------------------
 # FASTAPI APP
