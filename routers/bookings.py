@@ -14,6 +14,7 @@ from models import BookingRequest, ConfirmedBooking
 import logging
 import requests
 import json
+from datetime import datetime, date  # Add this import
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/booking-requests", tags=["Booking Requests"])
@@ -225,8 +226,6 @@ async def manager_decision(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ... (rest of your endpoints remain exactly the same)
-    
 @router.get("/debug-decision/{decision}")
 def debug_decision(decision: str):
     """Test endpoint to verify decision handling"""
@@ -236,6 +235,7 @@ def debug_decision(decision: str):
         "is_rejected": decision.lower() in ["reject", "rejected"],
         "is_confirmed": decision.lower() in ["confirm", "confirmed"]
     }
+
 
 @router.get("/debug-decision-endpoint")
 def debug_decision_endpoint():
@@ -247,6 +247,7 @@ def debug_decision_endpoint():
         "source": source[:1000] + "..."  # First 1000 chars
     }
     
+
 @router.get("/debug-endpoint")
 def debug_endpoint():
     """Debug endpoint to see what code is running"""
@@ -438,7 +439,38 @@ def generate_waitlist_draft(
 
         return {"draft": draft}
 
-
     except Exception as e:
         logger.error(f"Error generating waitlist draft: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+
+# ==================== NEW ENDPOINTS FOR TODAY'S DATA ====================
+
+@router.get("/today/check-ins")
+def get_today_check_ins(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get all check-ins for today"""
+    today_date = date.today()
+    check_ins = db.query(models.BookingRequest).filter(
+        models.BookingRequest.hotel_id == current_user.hotel_id,
+        models.BookingRequest.arrival_date == today_date,
+        models.BookingRequest.status.in_(["Confirmed", "Pending"])
+    ).all()
+    return check_ins
+
+
+@router.get("/today/check-outs")
+def get_today_check_outs(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get all check-outs for today"""
+    today_date = date.today()
+    check_outs = db.query(models.BookingRequest).filter(
+        models.BookingRequest.hotel_id == current_user.hotel_id,
+        models.BookingRequest.departure_date == today_date,
+        models.BookingRequest.status.in_(["Confirmed", "Pending"])
+    ).all()
+    return check_outs
