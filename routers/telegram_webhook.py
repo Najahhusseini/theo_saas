@@ -1,3 +1,7 @@
+import logging
+logger = logging.getLogger(__name__)
+logger.info(f"✅ Loading {__name__}")
+
 from services.templates import (
     booking_details_template, 
     stats_template, 
