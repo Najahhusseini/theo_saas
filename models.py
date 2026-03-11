@@ -55,11 +55,16 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
-    role = Column(String)
+    role = Column(String, default="staff") 
 
     hotel_id = Column(Integer, ForeignKey("hotels.id"))
     hotel = relationship("Hotel", back_populates="users")
-
+    phone = Column(String, nullable=True)    
+    active = Column(Boolean, default=True)   
+    last_login = Column(DateTime, nullable=True) 
+    
+    # Relationships
+    hotel = relationship("Hotel", back_populates="users")
 
 class RoomType(Base):
     __tablename__ = "room_types"
