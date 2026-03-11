@@ -499,6 +499,11 @@ def login(
 ):
     """Login endpoint - returns JWT token"""
     try:
+        logger.info("="*50)
+        logger.info("🔐 LOGIN ATTEMPT")
+        logger.info(f"Username: {form_data.username}")
+        
+        # Query user with all fields
         user = db.query(models.User).filter(
             models.User.email == form_data.username
         ).first()
@@ -507,19 +512,48 @@ def login(
             logger.warning(f"Login failed: User not found - {form_data.username}")
             raise HTTPException(status_code=400, detail="Invalid credentials")
         
+        logger.info(f"User found: ID={user.id}, Email={user.email}, Role={user.role}, Hotel ID={user.hotel_id}")
+        logger.info(f"User active status: {getattr(user, 'active', 'field not found')}")
+        
+        # Check if user is active (if the field exists)
+        if hasattr(user, 'active') and user.active is False:
+            logger.warning(f"Login failed: User account is deactivated - {form_data.username}")
+            raise HTTPException(status_code=403, detail="Account is deactivated")
+        
+        # Verify password
         if not verify_password(form_data.password, user.hashed_password):
             logger.warning(f"Login failed: Invalid password for {form_data.username}")
             raise HTTPException(status_code=400, detail="Invalid credentials")
         
-        token = create_access_token({
+        # Update last login timestamp (if field exists)
+        if hasattr(user, 'last_login'):
+            try:
+                user.last_login = datetime.utcnow()
+                db.commit()
+                logger.info(f"✅ Updated last_login for user {user.id}")
+            except Exception as e:
+                logger.error(f"Failed to update last_login: {e}")
+                db.rollback()
+                # Don't fail login if last_login update fails
+        
+        # Create access token with user data
+        token_data = {
             "sub": user.email,
+            "user_id": user.id,
             "hotel_id": user.hotel_id,
             "role": user.role
-        })
+        }
+        
+        # Add name to token if it exists
+        if hasattr(user, 'name') and user.name:
+            token_data["name"] = user.name
+        
+        token = create_access_token(token_data)
         
         logger.info(f"✅ Login successful: {user.email}")
         
-        return {
+        # Build response with all available fields
+        response_data = {
             "access_token": token,
             "token_type": "bearer",
             "user_id": user.id,
@@ -528,10 +562,22 @@ def login(
             "hotel_id": user.hotel_id
         }
         
+        # Add optional fields if they exist
+        if hasattr(user, 'name') and user.name:
+            response_data["name"] = user.name
+        
+        if hasattr(user, 'phone') and user.phone:
+            response_data["phone"] = user.phone
+            
+        if hasattr(user, 'active') and user.active is not None:
+            response_data["active"] = user.active
+        
+        return response_data
+        
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ Login error: {e}")
+        logger.error(f"❌ Login error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
     
 # -------------------------
