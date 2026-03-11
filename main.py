@@ -869,6 +869,108 @@ def clear_database(db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         return {"error": str(e)}
+    
+# -------------------------
+# USER MANAGEMENT ENDPOINTS
+# -------------------------
+@app.get("/users/hotel/{hotel_id}")
+def get_users_by_hotel(
+    hotel_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Get all users for a specific hotel"""
+    # Only admins and managers can view staff
+    if current_user.role not in ["admin", "manager"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    users = db.query(models.User).filter(models.User.hotel_id == hotel_id).all()
+    return [
+        {
+            "id": u.id,
+            "name": u.name,
+            "email": u.email,
+            "role": u.role,
+            "hotel_id": u.hotel_id,
+            "phone": u.phone,
+            "active": u.active,
+            "last_login": u.last_login,
+            "created_at": u.created_at
+        }
+        for u in users
+    ]
+
+@app.put("/users/{user_id}")
+def update_user(
+    user_id: int,
+    name: str = None,
+    email: str = None,
+    role: str = None,
+    phone: str = None,
+    active: bool = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Update user information"""
+    # Check authorization
+    if current_user.role not in ["admin", "manager"] and current_user.id != user_id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if name is not None:
+        user.name = name
+    if email is not None:
+        # Check if email is already taken
+        existing = db.query(models.User).filter(
+            models.User.email == email,
+            models.User.id != user_id
+        ).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="Email already in use")
+        user.email = email
+    if role is not None:
+        if current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only admins can change roles")
+        user.role = role
+    if phone is not None:
+        user.phone = phone
+    if active is not None:
+        user.active = active
+    
+    db.commit()
+    db.refresh(user)
+    
+    return {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "role": user.role,
+        "hotel_id": user.hotel_id,
+        "phone": user.phone,
+        "active": user.active
+    }
+
+@app.delete("/users/{user_id}")
+def delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    """Delete a user (admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can delete users")
+    
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    db.delete(user)
+    db.commit()
+    
+    return {"message": "User deleted successfully"}
 
 # -------------------------
 # SHUTDOWN EVENT
