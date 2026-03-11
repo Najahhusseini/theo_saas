@@ -144,6 +144,18 @@ app.include_router(modifications_router)
 
 
 # Add this after your CORS middleware
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(rest_of_path: str):
+    """Handle OPTIONS requests for all routes"""
+    return JSONResponse(
+        content={"message": "OK"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Allow-Credentials": "true",
+        },
+    )
 @app.options("/hotels/")
 async def hotels_options():
     """Handle OPTIONS requests for CORS preflight"""
@@ -1099,3 +1111,8 @@ def delete_user(
 async def shutdown_event():
     """Run on application shutdown"""
     logger.info("THeO Application Shutting Down - Version 2.0")
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8080))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
