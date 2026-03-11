@@ -117,6 +117,13 @@ app = FastAPI(
     description="API for hotel booking automation system with Telegram integration and modification tracking",
     version="2.0.0"
 )
+
+logger.info("="*60)
+logger.info("🚀 FASTAPI APP CREATED")
+logger.info(f"📋 Title: {app.title}")
+logger.info(f"📦 Version: {app.version}")
+logger.info("="*60)
+
 # 👇 ADD CORS MIDDLEWARE HERE - RIGHT AFTER CREATING APP
 app.add_middleware(
     CORSMiddleware,
@@ -126,10 +133,9 @@ app.add_middleware(
         "https://stackblitz.com", 
         "https://*.stackblitz.io", 
         "https://*.stackblitz.com",
-        "http://localhost:5173",  # Add HTTP version too
-        "http://localhost:3000",   # Common React port
+        "http://localhost:5173",
+        "http://localhost:3000",
         "*"
-
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -143,7 +149,7 @@ app.include_router(telegram_router)
 app.include_router(modifications_router)
 
 
-# Add this after your CORS middleware
+# Add OPTIONS handlers for CORS
 @app.options("/{rest_of_path:path}")
 async def preflight_handler(rest_of_path: str):
     """Handle OPTIONS requests for all routes"""
@@ -156,6 +162,7 @@ async def preflight_handler(rest_of_path: str):
             "Access-Control-Allow-Credentials": "true",
         },
     )
+
 @app.options("/hotels/")
 async def hotels_options():
     """Handle OPTIONS requests for CORS preflight"""
@@ -179,6 +186,7 @@ async def users_options():
             "Access-Control-Allow-Headers": "Content-Type, Authorization",
         },
     )
+
 # -------------------------
 # MIDDLEWARE
 # -------------------------
@@ -235,7 +243,7 @@ async def debug_db(db: Session = Depends(get_db)):
             "error": str(e),
             "status": "degraded"
         }
-    
+
 # -------------------------
 # ROOT ENDPOINT
 # -------------------------
@@ -248,6 +256,9 @@ def read_root():
         "endpoints": {
             "docs": "/docs",
             "health": "/health",
+            "ping": "/ping",
+            "debug-env": "/debug-env",
+            "debug-db": "/debug-db",
             "telegram_webhook": "/telegram/webhook",
             "bookings": "/booking-requests",
             "confirmed_bookings": "/confirmed-bookings",
@@ -1112,7 +1123,13 @@ async def shutdown_event():
     """Run on application shutdown"""
     logger.info("THeO Application Shutting Down - Version 2.0")
 
+# -------------------------
+# START SERVER (for direct execution)
+# -------------------------
 if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8080))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
+    print(f"🚀 Starting server on port {port}")
+    print(f"📡 Host: 0.0.0.0")
+    print(f"🔗 URL: http://0.0.0.0:{port}")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False, log_level="info")
