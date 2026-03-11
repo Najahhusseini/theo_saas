@@ -179,6 +179,52 @@ async def log_requests(request: Request, call_next):
     return response
 
 # -------------------------
+# TEST ENDPOINTS (for debugging)
+# -------------------------
+@app.get("/ping")
+async def ping():
+    """Simple ping endpoint to check if server is running"""
+    return {"status": "ok", "message": "Server is running", "timestamp": str(datetime.utcnow())}
+
+@app.get("/debug-env")
+async def debug_env():
+    """Debug endpoint to check environment variables (without exposing secrets)"""
+    return {
+        "telegram_token_set": bool(TELEGRAM_BOT_TOKEN),
+        "manager_chat_id_set": bool(MANAGER_CHAT_ID),
+        "database_url_set": bool(DATABASE_URL),
+        "environment": os.getenv("RAILWAY_ENVIRONMENT", "development")
+    }
+
+@app.get("/debug-db")
+async def debug_db(db: Session = Depends(get_db)):
+    """Debug endpoint to check database connection"""
+    try:
+        from sqlalchemy import text
+        result = db.execute(text("SELECT 1")).scalar()
+        user_count = db.query(models.User).count()
+        hotel_count = db.query(models.Hotel).count()
+        
+        # Check users table columns
+        from sqlalchemy import inspect
+        inspector = inspect(db.bind)
+        user_columns = [col['name'] for col in inspector.get_columns('users')]
+        
+        return {
+            "database_connected": bool(result == 1),
+            "user_count": user_count,
+            "hotel_count": hotel_count,
+            "user_columns": user_columns,
+            "status": "healthy"
+        }
+    except Exception as e:
+        return {
+            "database_connected": False,
+            "error": str(e),
+            "status": "degraded"
+        }
+    
+# -------------------------
 # ROOT ENDPOINT
 # -------------------------
 @app.get("/")
