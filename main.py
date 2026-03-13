@@ -1,17 +1,36 @@
-import os
-import logging
 import sys
 import traceback
-from dotenv import load_dotenv
-from datetime import datetime
-from pydantic import BaseModel
-from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException, Request
-from fastapi.security import OAuth2PasswordRequestForm
-from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
-from fastapi.middleware.cors import CORSMiddleware
+print("="*60)
+print("🚀 STARTING APPLICATION")
+print("="*60)
+
+try:
+    import os
+    import logging
+    import traceback
+    from dotenv import load_dotenv
+    from datetime import datetime
+    from pydantic import BaseModel
+    from typing import Optional
+    print("✅ Basic imports successful")
+except Exception as e:
+    print(f"❌ Basic import error: {e}")
+    traceback.print_exc()
+    sys.exit(1)
+
+
+try:
+    from fastapi import FastAPI, Depends, HTTPException, Request
+    from fastapi.security import OAuth2PasswordRequestForm
+    from fastapi.responses import JSONResponse
+    from sqlalchemy.orm import Session
+    from fastapi.middleware.cors import CORSMiddleware
+    print("✅ FastAPI imports successful")
+except Exception as e:
+    print(f"❌ FastAPI import error: {e}")
+    traceback.print_exc()
+    sys.exit(1)
 
 # Catch any import errors at the very beginning
 try:
@@ -24,18 +43,42 @@ try:
         get_current_user,
         hash_password,
     )
-
+    print("✅ Local module imports successful")
+except Exception as e:
+    print(f"❌ Local module import error: {e}")
+    traceback.print_exc()
+    sys.exit(1)
+try:
     from routers.bookings import router as bookings_router
+    print("✅ bookings_router imported")
+except Exception as e:
+    print(f"❌ bookings_router import error: {e}")
+    traceback.print_exc()
+    sys.exit(1)
+try:
     from routers.confirmed_bookings import router as confirmed_router
+    print("✅ confirmed_router imported")
+except Exception as e:
+    print(f"❌ confirmed_router import error: {e}")
+    traceback.print_exc()
+    sys.exit(1)
     from routers.telegram_webhook import router as telegram_router
+    print("✅ telegram_router imported")
+except Exception as e:
+    print(f"❌ telegram_router import error: {e}")
+    traceback.print_exc()
+    sys.exit(1)
+try:
     from routers import modifications
     modifications_router = modifications.router
-    print("✅ All imports successful")
+    print("✅ modifications_router imported")
 except Exception as e:
-    print(f"❌ Import error: {e}")
+    print(f"❌ modifications_router import error: {e}")
     traceback.print_exc()
     sys.exit(1)
 
+print("✅ ALL IMPORTS SUCCESSFUL")
+print("="*60)
 # -------------------------
 # SETUP LOGGING
 # -------------------------
