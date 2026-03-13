@@ -142,12 +142,69 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
-app.include_router(bookings_router)
-app.include_router(confirmed_router)
-app.include_router(telegram_router)
-app.include_router(modifications_router)
+# -------------------------
+# DEBUG: Check before router includes
+# -------------------------
+logger.info("="*60)
+logger.info("📦 PREPARING TO INCLUDE ROUTERS")
+logger.info(f"Current working directory: {os.getcwd()}")
+logger.info(f"Files in routers directory: {os.listdir('routers') if os.path.exists('routers') else 'routers folder not found'}")
 
+# Include routers with detailed logging
+logger.info("="*60)
+logger.info("📦 INCLUDING ROUTERS")
+
+try:
+    logger.info("  - Attempting to import bookings_router...")
+    from routers.bookings import router as bookings_router
+    logger.info("  ✅ bookings_router imported successfully")
+    
+    logger.info("  - Including bookings_router...")
+    app.include_router(bookings_router)
+    logger.info("  ✅ bookings_router included")
+except Exception as e:
+    logger.error(f"❌ Failed with bookings_router: {e}", exc_info=True)
+    raise
+
+try:
+    logger.info("  - Attempting to import confirmed_router...")
+    from routers.confirmed_bookings import router as confirmed_router
+    logger.info("  ✅ confirmed_router imported successfully")
+    
+    logger.info("  - Including confirmed_router...")
+    app.include_router(confirmed_router)
+    logger.info("  ✅ confirmed_router included")
+except Exception as e:
+    logger.error(f"❌ Failed with confirmed_router: {e}", exc_info=True)
+    raise
+
+try:
+    logger.info("  - Attempting to import telegram_router...")
+    from routers.telegram_webhook import router as telegram_router
+    logger.info("  ✅ telegram_router imported successfully")
+    
+    logger.info("  - Including telegram_router...")
+    app.include_router(telegram_router)
+    logger.info("  ✅ telegram_router included")
+except Exception as e:
+    logger.error(f"❌ Failed with telegram_router: {e}", exc_info=True)
+    raise
+
+try:
+    logger.info("  - Attempting to import modifications_router...")
+    from routers import modifications
+    modifications_router = modifications.router
+    logger.info("  ✅ modifications_router imported successfully")
+    
+    logger.info("  - Including modifications_router...")
+    app.include_router(modifications_router)
+    logger.info("  ✅ modifications_router included")
+except Exception as e:
+    logger.error(f"❌ Failed with modifications_router: {e}", exc_info=True)
+    raise
+
+logger.info("✅ All routers included successfully")
+logger.info("="*60)
 
 # Add OPTIONS handlers for CORS
 @app.options("/{rest_of_path:path}")
