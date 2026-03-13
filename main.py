@@ -1,5 +1,7 @@
 import os
 import logging
+import sys
+import traceback
 from dotenv import load_dotenv
 from datetime import datetime
 from pydantic import BaseModel
@@ -11,21 +13,28 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from fastapi.middleware.cors import CORSMiddleware
 
-import models
-from models import HotelCreate  
-from database import engine, get_db
-from auth import (
-    verify_password,
-    create_access_token,
-    get_current_user,
-    hash_password,
-)
+# Catch any import errors at the very beginning
+try:
+    import models
+    from models import HotelCreate  
+    from database import engine, get_db
+    from auth import (
+        verify_password,
+        create_access_token,
+        get_current_user,
+        hash_password,
+    )
 
-from routers.bookings import router as bookings_router
-from routers.confirmed_bookings import router as confirmed_router
-from routers.telegram_webhook import router as telegram_router
-from routers import modifications
-modifications_router = modifications.router
+    from routers.bookings import router as bookings_router
+    from routers.confirmed_bookings import router as confirmed_router
+    from routers.telegram_webhook import router as telegram_router
+    from routers import modifications
+    modifications_router = modifications.router
+    print("✅ All imports successful")
+except Exception as e:
+    print(f"❌ Import error: {e}")
+    traceback.print_exc()
+    sys.exit(1)
 
 # -------------------------
 # SETUP LOGGING
@@ -108,6 +117,7 @@ try:
 
 except Exception as e:
     logger.error(f"❌ Error creating database tables: {e}")
+    # Don't exit, maybe tables already exist
 
 # -------------------------
 # FASTAPI APP
