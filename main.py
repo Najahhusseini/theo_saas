@@ -181,6 +181,63 @@ logger.info(f"📦 Version: {app.version}")
 logger.info("=" * 60)
 
 # -------------------------
+# CREATE HOTEL
+# -------------------------
+@app.post("/hotels/")
+def create_hotel(
+    hotel: HotelCreate,
+    db: Session = Depends(get_db)
+):
+    """Create a new hotel with complete information"""
+    try:
+        logger.info(f"📥 Received hotel creation request: {hotel.name}")
+        
+        # Check if hotel with same email already exists
+        if hotel.email:
+            existing = db.query(models.Hotel).filter(models.Hotel.email == hotel.email).first()
+            if existing:
+                logger.warning(f"❌ Hotel with email {hotel.email} already exists")
+                raise HTTPException(status_code=400, detail="Hotel with this email already exists")
+        
+        # Create new hotel with all fields
+        new_hotel = models.Hotel(
+            name=hotel.name,
+            subscription_plan=hotel.subscription_plan,
+            address=hotel.address,
+            city=hotel.city,
+            country=hotel.country,
+            phone=hotel.phone,
+            email=hotel.email
+        )
+        
+        db.add(new_hotel)
+        db.commit()
+        db.refresh(new_hotel)
+        
+        logger.info(f"✅ Created hotel: {hotel.name} (ID: {new_hotel.id})")
+        
+        # Return the created hotel with ALL fields including ID
+        response_data = {
+            "id": new_hotel.id,
+            "name": new_hotel.name,
+            "subscription_plan": new_hotel.subscription_plan,
+            "address": new_hotel.address,
+            "city": new_hotel.city,
+            "country": new_hotel.country,
+            "phone": new_hotel.phone,
+            "email": new_hotel.email
+        }
+        
+        return response_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error creating hotel: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+# -------------------------
 # BACKGROUND MIGRATIONS
 # -------------------------
 async def run_background_migrations():
