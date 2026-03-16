@@ -163,6 +163,7 @@ app.add_middleware(
         "https://stackblitz.com",
         "https://*.stackblitz.io",
         "https://*.stackblitz.com",
+        "https://vitejsvitenejrzqzk-bdt5--5173--8669d46c.local-corp.webcontainer.io/"
         "http://localhost:5173",
         "http://localhost:3000",
         "https://theo-saas.onrender.com",
