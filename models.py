@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, Text, TIMESTAMP, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Date, ForeignKey, Text, TIMESTAMP, Boolean, DateTime, JSON
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime
@@ -73,8 +73,13 @@ class RoomType(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     total_rooms = Column(Integer, nullable=False)
-
     hotel_id = Column(Integer, ForeignKey("hotels.id"))
+    price_per_night = Column(Integer, nullable=True)
+    max_guests = Column(Integer, nullable=True)
+    description = Column(String, nullable=True)
+    amenities = Column(JSON, nullable=True) 
+
+
     hotel = relationship("Hotel", back_populates="room_types")
 
 

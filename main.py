@@ -309,6 +309,79 @@ def create_user(
         logger.error(f"❌ Error creating user: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    
+# -------------------------
+# CREATE ROOM TYPE
+# -------------------------
+@app.post("/room-types/create")
+def create_room_type(
+    name: str,
+    total_rooms: int,
+    hotel_id: int,
+    price_per_night: int = None,
+    max_guests: int = None,
+    description: str = None,
+    amenities: str = None,
+    db: Session = Depends(get_db)
+):
+    """Create a new room type for a hotel"""
+    try:
+        # Check if hotel exists
+        hotel = db.query(models.Hotel).filter(models.Hotel.id == hotel_id).first()
+        if not hotel:
+            raise HTTPException(status_code=404, detail="Hotel not found")
+        
+        # Check if room type already exists for this hotel
+        existing = db.query(models.RoomType).filter(
+            models.RoomType.hotel_id == hotel_id,
+            models.RoomType.name == name
+        ).first()
+        
+        if existing:
+            raise HTTPException(status_code=400, detail="Room type already exists for this hotel")
+        
+        # Parse amenities if provided as JSON string
+        amenities_list = []
+        if amenities:
+            import json
+            try:
+                amenities_list = json.loads(amenities)
+            except:
+                amenities_list = [amenities]
+        
+        new_room_type = models.RoomType(
+            name=name,
+            total_rooms=total_rooms,
+            hotel_id=hotel_id,
+            price_per_night=price_per_night,
+            max_guests=max_guests,
+            description=description,
+            amenities=amenities_list
+        )
+        
+        db.add(new_room_type)
+        db.commit()
+        db.refresh(new_room_type)
+        
+        logger.info(f"✅ Created room type: {name} for hotel {hotel_id}")
+        
+        return {
+            "id": new_room_type.id,
+            "name": new_room_type.name,
+            "total_rooms": new_room_type.total_rooms,
+            "hotel_id": new_room_type.hotel_id,
+            "price_per_night": new_room_type.price_per_night,
+            "max_guests": new_room_type.max_guests,
+            "description": new_room_type.description,
+            "amenities": new_room_type.amenities
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error creating room type: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------------
 # BACKGROUND MIGRATIONS
