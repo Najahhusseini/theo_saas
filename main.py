@@ -236,6 +236,79 @@ def create_hotel(
         logger.error(f"❌ Error creating hotel: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    
+# -------------------------
+# CREATE USER
+# -------------------------
+@app.post("/users/")
+def create_user(
+    email: str,
+    password: str,
+    role: str,
+    hotel_id: int,
+    name: str = None,
+    phone: str = None,
+    active: bool = True,
+    db: Session = Depends(get_db)
+):
+    """Create a new user"""
+    try:
+        # Check if user already exists
+        existing_user = db.query(models.User).filter(
+            models.User.email == email
+        ).first()
+        
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
+        
+        # Validate password length
+        if len(password) > 72:
+            raise HTTPException(status_code=400, detail="Password too long (max 72 characters)")
+        
+        # Validate role
+        if role not in ["admin", "manager", "staff", "frontdesk", "housekeeping"]:
+            raise HTTPException(status_code=400, detail="Invalid role. Must be admin, manager, staff, frontdesk, or housekeeping")
+        
+        # Check if hotel exists
+        hotel = db.query(models.Hotel).filter(models.Hotel.id == hotel_id).first()
+        if not hotel:
+            raise HTTPException(status_code=404, detail="Hotel not found")
+        
+        hashed_pw = hash_password(password)
+        
+        new_user = models.User(
+            email=email,
+            hashed_password=hashed_pw,
+            role=role,
+            hotel_id=hotel_id,
+            name=name,
+            phone=phone,
+            active=active
+        )
+        
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        logger.info(f"✅ Created user: {email} (Role: {role}) for hotel {hotel_id}")
+        
+        return {
+            "id": new_user.id,
+            "email": new_user.email,
+            "name": new_user.name,
+            "role": new_user.role,
+            "hotel_id": new_user.hotel_id,
+            "phone": new_user.phone,
+            "active": new_user.active,
+            "message": "User created successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error creating user: {e}")
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 # -------------------------
 # BACKGROUND MIGRATIONS
