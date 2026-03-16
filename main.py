@@ -1276,11 +1276,3 @@ async def shutdown_event():
 # Note: This block is only used when running directly with python main.py
 # Render uses the command: uvicorn main:app --host 0.0.0.0 --port $PORT
 # So this block is NOT used on Render
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", 8080))
-    print(f"🚀 Starting server on port {port}")
-    print(f"📡 Host: 0.0.0.0")
-    print(f"🔗 URL: http://0.0.0.0:{port}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False, log_level="info")
