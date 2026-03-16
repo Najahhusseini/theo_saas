@@ -55,6 +55,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
+    name = Column(String, nullable=True) 
     role = Column(String, default="staff") 
 
     hotel_id = Column(Integer, ForeignKey("hotels.id"))
