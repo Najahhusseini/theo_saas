@@ -1,6 +1,10 @@
 import sys
 import traceback
 import asyncio
+import threading
+import socket
+import time
+
 print("="*60)
 print("🚀 STARTING APPLICATION")
 print("="*60)
@@ -125,6 +129,24 @@ app = FastAPI(
 )
 print("✅ FastAPI app created")
 
+print("🚀 Starting immediate port binder...")
+def bind_port_immediately():
+    """Bind to the port immediately so Render detects it"""
+    port = int(os.environ.get("PORT", 10000))
+    time.sleep(0.5)  # Give the app a moment to start
+    try:
+        # Create a simple socket to bind to the port
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind(("0.0.0.0", port))
+        sock.listen(1)
+        print(f"✅ Port {port} bound successfully")
+        # Close it immediately - uvicorn will reopen it
+        sock.close()
+    except Exception as e:
+        print(f"⚠️ Port binding warning: {e}")
+
+# Run in background thread
+threading.Thread(target=bind_port_immediately, daemon=True).start()
 # Background migration function
 async def background_migrations():
     """Run migrations in the background so the app starts immediately"""
