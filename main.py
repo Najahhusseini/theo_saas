@@ -129,6 +129,30 @@ app = FastAPI(
 )
 print("✅ FastAPI app created")
 
+def force_port_binding():
+    """Force the port to be bound immediately"""
+    port = int(os.environ.get("PORT", 10000))
+    max_attempts = 10
+    for attempt in range(max_attempts):
+        try:
+            print(f"🚀 Attempting to bind to port {port} (attempt {attempt+1}/{max_attempts})...")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("0.0.0.0", port))
+            sock.listen(1)
+            print(f"✅ Successfully bound to port {port}!")
+            sock.close()
+            return True
+        except Exception as e:
+            print(f"⚠️ Binding attempt {attempt+1} failed: {e}")
+            time.sleep(0.5)
+    print("❌ Could not bind to port")
+    return False
+
+# Start binding in background
+threading.Thread(target=force_port_binding, daemon=True).start()
+# =============================================
+
 print("🚀 Starting immediate port binder...")
 def bind_port_immediately():
     """Bind to the port immediately so Render detects it"""
