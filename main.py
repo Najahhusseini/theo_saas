@@ -382,6 +382,8 @@ def create_room_type(
         logger.error(f"❌ Error creating room type: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    
+
 
 # -------------------------
 # BACKGROUND MIGRATIONS
@@ -431,6 +433,44 @@ async def run_background_migrations():
     except Exception as e:
         logger.error(f"❌ Background migration error: {e}")
         print(f"❌ Migration error: {e}")
+
+# -------------------------
+# AUTO-DATABASE MIGRATIONS
+# -------------------------
+def ensure_database_schema():
+    """Ensure all required columns exist in database tables"""
+    try:
+        from sqlalchemy import inspect, text
+        
+        logger.info("🔧 Checking database schema...")
+        
+        with engine.connect() as conn:
+            # Check room_types table
+            inspector = inspect(engine)
+            if 'room_types' in inspector.get_table_names():
+                existing_columns = [col['name'] for col in inspector.get_columns('room_types')]
+                
+                # Add missing columns
+                columns_to_add = [
+                    ('price_per_night', 'INTEGER'),
+                    ('max_guests', 'INTEGER'),
+                    ('description', 'TEXT'),
+                    ('amenities', 'JSONB')
+                ]
+                
+                for col_name, col_type in columns_to_add:
+                    if col_name not in existing_columns:
+                        conn.execute(text(f"ALTER TABLE room_types ADD COLUMN {col_name} {col_type}"))
+                        logger.info(f"✅ Added {col_name} to room_types")
+            
+            conn.commit()
+            logger.info("✅ Database schema check complete")
+            
+    except Exception as e:
+        logger.error(f"⚠️ Schema check error (non-fatal): {e}")
+
+# Call this right after creating the engine
+ensure_database_schema()
 
 @app.on_event("startup")
 async def startup_event():
