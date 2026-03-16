@@ -8,7 +8,6 @@ print("="*60)
 try:
     import os
     import logging
-    import traceback
     from dotenv import load_dotenv
     from datetime import datetime
     from pydantic import BaseModel
@@ -48,6 +47,7 @@ except Exception as e:
     print(f"❌ Local module import error: {e}")
     traceback.print_exc()
     sys.exit(1)
+
 try:
     from routers.bookings import router as bookings_router
     print("✅ bookings_router imported")
@@ -55,6 +55,7 @@ except Exception as e:
     print(f"❌ bookings_router import error: {e}")
     traceback.print_exc()
     sys.exit(1)
+
 try:
     from routers.confirmed_bookings import router as confirmed_router
     print("✅ confirmed_router imported")
@@ -62,12 +63,15 @@ except Exception as e:
     print(f"❌ confirmed_router import error: {e}")
     traceback.print_exc()
     sys.exit(1)
+
+try:
     from routers.telegram_webhook import router as telegram_router
     print("✅ telegram_router imported")
 except Exception as e:
     print(f"❌ telegram_router import error: {e}")
     traceback.print_exc()
     sys.exit(1)
+
 try:
     from routers import modifications
     modifications_router = modifications.router
@@ -79,6 +83,7 @@ except Exception as e:
 
 print("✅ ALL IMPORTS SUCCESSFUL")
 print("="*60)
+
 # -------------------------
 # SETUP LOGGING
 # -------------------------
@@ -168,7 +173,10 @@ except Exception as e:
 app = FastAPI(
     title="THeO Hotel Booking Automation",
     description="API for hotel booking automation system with Telegram integration and modification tracking",
-    version="2.0.0"
+    version="2.0.0",
+    docs_url="/docs",        # Explicitly enable docs
+    redoc_url="/redoc",       # Explicitly enable redoc
+    openapi_url="/openapi.json"  # Explicitly enable OpenAPI schema
 )
 
 logger.info("="*60)
@@ -188,6 +196,7 @@ app.add_middleware(
         "https://*.stackblitz.com",
         "http://localhost:5173",
         "http://localhost:3000",
+        "https://theo-backend.onrender.com",  # Add your Render URL
         "*"
     ],
     allow_credentials=True,
@@ -258,6 +267,19 @@ except Exception as e:
 
 logger.info("✅ All routers included successfully")
 logger.info("="*60)
+
+# Add debug endpoint to check routes
+@app.get("/debug-routes")
+def debug_routes():
+    """List all registered routes"""
+    routes = []
+    for route in app.routes:
+        routes.append({
+            "path": route.path,
+            "name": route.name,
+            "methods": list(route.methods) if hasattr(route, 'methods') else None
+        })
+    return {"routes": routes}
 
 # Add OPTIONS handlers for CORS
 @app.options("/{rest_of_path:path}")
@@ -365,10 +387,13 @@ def read_root():
         "version": "2.0.0",
         "endpoints": {
             "docs": "/docs",
+            "redoc": "/redoc",
+            "openapi": "/openapi.json",
             "health": "/health",
             "ping": "/ping",
             "debug-env": "/debug-env",
             "debug-db": "/debug-db",
+            "debug-routes": "/debug-routes",
             "telegram_webhook": "/telegram/webhook",
             "bookings": "/booking-requests",
             "confirmed_bookings": "/confirmed-bookings",
