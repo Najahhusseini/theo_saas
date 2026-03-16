@@ -1,6 +1,6 @@
 import sys
 import traceback
-
+import asyncio
 print("="*60)
 print("🚀 STARTING APPLICATION")
 print("="*60)
@@ -125,6 +125,80 @@ app = FastAPI(
 )
 print("✅ FastAPI app created")
 
+# Background migration function
+async def background_migrations():
+    """Run migrations in the background so the app starts immediately"""
+    print("🚀 Background migrations started...")
+    try:
+        # Your entire migration code here
+        models.Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created successfully")
+
+        from sqlalchemy import text, inspect
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS address VARCHAR"))
+            conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS city VARCHAR"))
+            conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS country VARCHAR"))
+            conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS phone VARCHAR"))
+            conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS email VARCHAR"))
+            conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"))
+            conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"))
+            logger.info("✅ Added/verified columns in hotels table")
+            
+            inspector = inspect(engine)
+            existing_columns = [col['name'] for col in inspector.get_columns('users')]
+            logger.info(f"🔍 Existing columns in users table: {existing_columns}")
+            
+            columns_to_add = [
+                ('name', 'VARCHAR'),
+                ('phone', 'VARCHAR'),
+                ('active', 'BOOLEAN DEFAULT true'),
+                ('last_login', 'TIMESTAMP')
+            ]
+            
+            for col_name, col_type in columns_to_add:
+                if col_name not in existing_columns:
+                    try:
+                        conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"))
+                        logger.info(f"✅ Added {col_name} column to users table")
+                    except Exception as e:
+                        logger.error(f"❌ Failed to add {col_name}: {e}")
+                else:
+                    logger.info(f"✅ {col_name} column already exists")
+            
+            hotel_columns = [col['name'] for col in inspector.get_columns('hotels')]
+            logger.info(f"🔍 Existing columns in hotels table: {hotel_columns}")
+            
+            conn.commit()
+            logger.info("✅ Database migration check completed")
+        print("✅ Background migrations complete!")
+    except Exception as e:
+        logger.error(f"❌ Background migration error: {e}")
+        print(f"❌ Background migration error: {e}")
+
+# Startup event to run migrations in background
+@app.on_event("startup")
+async def startup_event():
+    """Run migrations in background on startup"""
+    logger.info("="*50)
+    logger.info("THeO Application Starting Up - Version 2.0")
+    logger.info("="*50)
+    
+    # Log environment status
+    logger.info(f"Environment: {'production' if os.getenv('RAILWAY_ENVIRONMENT') else 'development'}")
+    logger.info(f"Database URL: {DATABASE_URL[:20]}..." if DATABASE_URL else "Database URL: Not set")
+    
+    # Check Telegram configuration
+    if not TELEGRAM_BOT_TOKEN:
+        logger.warning("⚠️ TELEGRAM_BOT_TOKEN not set - Telegram features disabled")
+    if not MANAGER_CHAT_ID:
+        logger.warning("⚠️ MANAGER_CHAT_ID not set - Manager notifications disabled")
+    
+    # Start background migrations
+    asyncio.create_task(background_migrations())
+    
+    logger.info("="*50)
+
 # Add a super simple health check endpoint BEFORE anything else
 @app.get("/healthz")
 async def healthz():
@@ -160,65 +234,6 @@ logger.info("🚀 FASTAPI APP CONFIGURED")
 logger.info(f"📋 Title: {app.title}")
 logger.info(f"📦 Version: {app.version}")
 logger.info("="*60)
-
-# -------------------------
-# CREATE TABLES - DO THIS AFTER APP IS CREATED
-# -------------------------
-print("🚀 Starting database migrations...")
-try:
-    models.Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created successfully")
-
-    # Add missing columns to hotels table
-    from sqlalchemy import text, inspect
-    with engine.connect() as conn:
-        # Hotel columns (your existing code)
-        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS address VARCHAR"))
-        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS city VARCHAR"))
-        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS country VARCHAR"))
-        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS phone VARCHAR"))
-        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS email VARCHAR"))
-        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW()"))
-        conn.execute(text("ALTER TABLE hotels ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()"))
-        logger.info("✅ Added/verified columns in hotels table")
-        
-        # ----- NEW DIAGNOSTIC CODE FOR USERS TABLE -----
-        # Get existing columns in users table
-        inspector = inspect(engine)
-        existing_columns = [col['name'] for col in inspector.get_columns('users')]
-        logger.info(f"🔍 Existing columns in users table: {existing_columns}")
-        
-        # Define columns to add with their types
-        columns_to_add = [
-            ('name', 'VARCHAR'),
-            ('phone', 'VARCHAR'),
-            ('active', 'BOOLEAN DEFAULT true'),
-            ('last_login', 'TIMESTAMP')
-        ]
-        
-        # Add missing columns one by one
-        for col_name, col_type in columns_to_add:
-            if col_name not in existing_columns:
-                try:
-                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"))
-                    logger.info(f"✅ Added {col_name} column to users table")
-                except Exception as e:
-                    logger.error(f"❌ Failed to add {col_name}: {e}")
-            else:
-                logger.info(f"✅ {col_name} column already exists")
-        
-        # Also check hotels table columns for completeness
-        hotel_columns = [col['name'] for col in inspector.get_columns('hotels')]
-        logger.info(f"🔍 Existing columns in hotels table: {hotel_columns}")
-        
-        conn.commit()
-        logger.info("✅ Database migration check completed")
-        print("✅ Database migrations complete")
-
-except Exception as e:
-    logger.error(f"❌ Error creating database tables: {e}")
-    print(f"❌ Database error: {e}")
-    # Don't exit, maybe tables already exist
 
 # -------------------------
 # DEBUG: Check before router includes
@@ -1107,35 +1122,6 @@ async def general_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "Internal server error"}
     )
-
-# -------------------------
-# STARTUP EVENT
-# -------------------------
-@app.on_event("startup")
-async def startup_event():
-    """Run on application startup"""
-    logger.info("="*50)
-    logger.info("THeO Application Starting Up - Version 2.0")
-    logger.info("="*50)
-    
-    # Log environment status
-    logger.info(f"Environment: {'production' if os.getenv('RAILWAY_ENVIRONMENT') else 'development'}")
-    logger.info(f"Database URL: {DATABASE_URL[:20]}..." if DATABASE_URL else "Database URL: Not set")
-    
-    # Check Telegram configuration
-    if not TELEGRAM_BOT_TOKEN:
-        logger.warning("⚠️ TELEGRAM_BOT_TOKEN not set - Telegram features disabled")
-    if not MANAGER_CHAT_ID:
-        logger.warning("⚠️ MANAGER_CHAT_ID not set - Manager notifications disabled")
-    
-    # Log available endpoints
-    logger.info("Available endpoints:")
-    for route in app.routes:
-        if hasattr(route, "methods") and route.path:
-            logger.info(f"  {route.methods} {route.path}")
-    
-    logger.info("="*50)
-
 
 # -------------------------
 # ADMIN: CLEAR DATABASE (TEMPORARY)
