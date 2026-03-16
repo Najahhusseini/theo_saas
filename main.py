@@ -112,8 +112,59 @@ logger.info(f"DATABASE_URL set: {'Yes' if DATABASE_URL else 'No'}")
 logger.info("===================================")
 
 # -------------------------
-# CREATE TABLES
+# FASTAPI APP - CREATE EARLY!
 # -------------------------
+print("🚀 Creating FastAPI app...")
+app = FastAPI(
+    title="THeO Hotel Booking Automation",
+    description="API for hotel booking automation system with Telegram integration and modification tracking",
+    version="2.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
+)
+print("✅ FastAPI app created")
+
+# Add a super simple health check endpoint BEFORE anything else
+@app.get("/healthz")
+async def healthz():
+    """Ultra simple health check - no DB, no nothing"""
+    return {"status": "alive"}
+
+@app.get("/ping")
+async def ping():
+    """Simple ping endpoint"""
+    return {"status": "ok", "message": "Server is running"}
+
+# 👇 ADD CORS MIDDLEWARE HERE - RIGHT AFTER CREATING APP
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://*.webcontainer.io", 
+        "https://localhost:5173", 
+        "https://stackblitz.com", 
+        "https://*.stackblitz.io", 
+        "https://*.stackblitz.com",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://theo-backend.onrender.com",
+        "*"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+logger.info("="*60)
+logger.info("🚀 FASTAPI APP CONFIGURED")
+logger.info(f"📋 Title: {app.title}")
+logger.info(f"📦 Version: {app.version}")
+logger.info("="*60)
+
+# -------------------------
+# CREATE TABLES - DO THIS AFTER APP IS CREATED
+# -------------------------
+print("🚀 Starting database migrations...")
 try:
     models.Base.metadata.create_all(bind=engine)
     logger.info("Database tables created successfully")
@@ -162,47 +213,12 @@ try:
         
         conn.commit()
         logger.info("✅ Database migration check completed")
+        print("✅ Database migrations complete")
 
 except Exception as e:
     logger.error(f"❌ Error creating database tables: {e}")
+    print(f"❌ Database error: {e}")
     # Don't exit, maybe tables already exist
-
-# -------------------------
-# FASTAPI APP
-# -------------------------
-app = FastAPI(
-    title="THeO Hotel Booking Automation",
-    description="API for hotel booking automation system with Telegram integration and modification tracking",
-    version="2.0.0",
-    docs_url="/docs",        # Explicitly enable docs
-    redoc_url="/redoc",       # Explicitly enable redoc
-    openapi_url="/openapi.json"  # Explicitly enable OpenAPI schema
-)
-
-logger.info("="*60)
-logger.info("🚀 FASTAPI APP CREATED")
-logger.info(f"📋 Title: {app.title}")
-logger.info(f"📦 Version: {app.version}")
-logger.info("="*60)
-
-# 👇 ADD CORS MIDDLEWARE HERE - RIGHT AFTER CREATING APP
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://*.webcontainer.io", 
-        "https://localhost:5173", 
-        "https://stackblitz.com", 
-        "https://*.stackblitz.io", 
-        "https://*.stackblitz.com",
-        "http://localhost:5173",
-        "http://localhost:3000",
-        "https://theo-backend.onrender.com",  # Add your Render URL
-        "*"
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # -------------------------
 # DEBUG: Check before router includes
@@ -333,11 +349,6 @@ async def log_requests(request: Request, call_next):
 # -------------------------
 # TEST ENDPOINTS (for debugging)
 # -------------------------
-@app.get("/ping")
-async def ping():
-    """Simple ping endpoint to check if server is running"""
-    return {"status": "ok", "message": "Server is running", "timestamp": str(datetime.utcnow())}
-
 @app.get("/debug-env")
 async def debug_env():
     """Debug endpoint to check environment variables (without exposing secrets)"""
@@ -391,6 +402,7 @@ def read_root():
             "openapi": "/openapi.json",
             "health": "/health",
             "ping": "/ping",
+            "healthz": "/healthz",
             "debug-env": "/debug-env",
             "debug-db": "/debug-db",
             "debug-routes": "/debug-routes",
@@ -1258,9 +1270,17 @@ async def shutdown_event():
     """Run on application shutdown"""
     logger.info("THeO Application Shutting Down - Version 2.0")
 
-@app.get("/healthz")
-async def healthz():
-    return {"status": "healthy"}
 # -------------------------
-# START SERVER (for direct execution)
+# START SERVER - THIS IS CRITICAL!
 # -------------------------
+# Note: This block is only used when running directly with python main.py
+# Render uses the command: uvicorn main:app --host 0.0.0.0 --port $PORT
+# So this block is NOT used on Render
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8080))
+    print(f"🚀 Starting server on port {port}")
+    print(f"📡 Host: 0.0.0.0")
+    print(f"🔗 URL: http://0.0.0.0:{port}")
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False, log_level="info")
