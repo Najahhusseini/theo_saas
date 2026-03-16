@@ -1258,11 +1258,9 @@ async def shutdown_event():
     """Run on application shutdown"""
     logger.info("THeO Application Shutting Down - Version 2.0")
 
+@app.get("/healthz")
+async def healthz():
+    return {"status": "healthy"}
 # -------------------------
 # START SERVER (for direct execution)
 # -------------------------
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8080))
-    print(f"🚀 Starting server on 0.0.0.0:{port}")
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
